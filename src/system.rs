@@ -209,12 +209,91 @@ pub fn play_test(s: &Settings, ch: &str) {
         eprintln!("dry-run: play {ch}");
         return;
     }
+    // A one-channel sound lets PipeWire guess: a mono "centre" was copied to
+    // the fronts until the stream settings changed mid-play, and it cut out.
+    // So the test plays every channel of the output, silent except this one.
+    let layout: &[&str] = if s.headphones() { &["FL", "FR"] } else { &["FL", "FR", "FC", "LFE", "RL", "RR"] };
+    let out = cache_dir().join(format!("test-{}-{ch}.wav", layout.len()));
+    let file = match spread_to_channel(&path, layout, ch, &out) {
+        Ok(()) => out,
+        Err(e) => {
+            eprintln!("sbcommand: test sound: {e}");
+            return;
+        }
+    };
     let mut cmd = Command::new("pw-play");
-    cmd.args(["--channels", "1", "--channel-map", ch]);
+    cmd.args(["--channels", &layout.len().to_string(), "--channel-map", &layout.join(",")]);
+    // Named like our own outputs, so the stereo settings leave it alone.
+    cmd.args(["--properties", "{ node.name = \"sbcommand.test\" media.role = \"Test\" }"]);
     if let Some(sink) = sink_name(s) {
         cmd.args(["--target", &sink]);
     }
-    let _ = cmd.arg(path).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+    // A new test stops the one still playing, so they never overlap.
+    static PLAYING: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
+    let mut playing = PLAYING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(mut old) = playing.take() {
+        let _ = old.kill();
+        let _ = old.wait();
+    }
+    *playing = cmd.arg(file).stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok();
+}
+
+/// Writes `src` (16-bit mono WAV) into one channel of a multichannel WAV.
+pub fn spread_to_channel(src: &PathBuf, layout: &[&str], ch: &str, dst: &PathBuf) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    let bad = |m: &str| Error::new(ErrorKind::InvalidData, format!("{}: {m}", src.display()));
+    let slot = layout.iter().position(|c| *c == ch).ok_or_else(|| bad("channel not in layout"))?;
+    let d = std::fs::read(src)?;
+    if d.len() < 12 || &d[0..4] != b"RIFF" || &d[8..12] != b"WAVE" {
+        return Err(bad("not a WAV file"));
+    }
+    let (mut rate, mut fmt_ok, mut data) = (0u32, false, None);
+    let mut i = 12;
+    while i + 8 <= d.len() {
+        let id = &d[i..i + 4];
+        let len = u32::from_le_bytes([d[i + 4], d[i + 5], d[i + 6], d[i + 7]]) as usize;
+        let body = &d[i + 8..(i + 8 + len).min(d.len())];
+        if id == b"fmt " && body.len() >= 16 {
+            let chans = u16::from_le_bytes([body[2], body[3]]);
+            let bits = u16::from_le_bytes([body[14], body[15]]);
+            rate = u32::from_le_bytes([body[4], body[5], body[6], body[7]]);
+            fmt_ok = chans == 1 && bits == 16;
+        } else if id == b"data" {
+            data = Some(body);
+        }
+        i += 8 + len + (len & 1);
+    }
+    let data = data.filter(|_| fmt_ok).ok_or_else(|| bad("needs 16-bit mono"))?;
+    // The stock voices peak around -6 dBFS and are hard to hear at normal
+    // speaker volume, so bring each test up to -1 dBFS (at most 4x).
+    let samples: Vec<i16> = data.chunks_exact(2).map(|s| i16::from_le_bytes([s[0], s[1]])).collect();
+    let peak = samples.iter().map(|v| v.unsigned_abs()).max().unwrap_or(0).max(1) as f64;
+    let gain = (32767.0 * 0.891 / peak).min(4.0);
+    let n = layout.len();
+    let mut pcm = vec![0u8; samples.len() * n * 2];
+    for (k, v) in samples.iter().enumerate() {
+        let o = (k * n + slot) * 2;
+        let x = (*v as f64 * gain).round().clamp(-32767.0, 32767.0) as i16;
+        pcm[o..o + 2].copy_from_slice(&x.to_le_bytes());
+    }
+    let mut wav = Vec::with_capacity(44 + pcm.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&(n as u16).to_le_bytes());
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&(rate * n as u32 * 2).to_le_bytes());
+    wav.extend_from_slice(&(n as u16 * 2).to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+    wav.extend_from_slice(&pcm);
+    if let Some(p) = dst.parent() {
+        std::fs::create_dir_all(p)?;
+    }
+    std::fs::write(dst, wav)
 }
 
 /// A rumble (50/70/90 Hz plus low noise) that any PC subwoofer can play.
@@ -688,3 +767,38 @@ fn node_id(name: &str) -> Option<u64> {
 
 
 
+
+#[cfg(test)]
+mod test_sound_tests {
+    use super::*;
+
+    #[test]
+    fn test_sound_plays_on_one_channel_only() {
+        let dir = std::env::temp_dir().join(format!("sbc-test-{}", std::process::id()));
+        let src = dir.join("mono.wav");
+        make_rumble(&src).unwrap();
+        let six = ["FL", "FR", "FC", "LFE", "RL", "RR"];
+        for (slot, ch) in six.iter().enumerate() {
+            let dst = dir.join(format!("{ch}.wav"));
+            spread_to_channel(&src, &six, ch, &dst).unwrap();
+            let d = std::fs::read(&dst).unwrap();
+            assert_eq!(u16::from_le_bytes([d[22], d[23]]), 6);
+            let pcm = &d[44..];
+            let mut energy = [0u64; 6];
+            for (k, s) in pcm.chunks_exact(2).enumerate() {
+                energy[k % 6] += i16::from_le_bytes([s[0], s[1]]).unsigned_abs() as u64;
+            }
+            for (c, e) in energy.iter().enumerate() {
+                assert_eq!(*e > 0, c == slot, "{ch}: channel {c}");
+            }
+            let peak = pcm.chunks_exact(2).map(|s| i16::from_le_bytes([s[0], s[1]]).unsigned_abs()).max().unwrap();
+            assert!((28_000..=29_300).contains(&peak), "{ch}: test sound peak {peak} should be about -1 dBFS");
+        }
+        if let Ok(keep) = std::env::var("SBC_KEEP_TEST_WAVS") {
+            for ch in six {
+                let _ = std::fs::copy(dir.join(format!("{ch}.wav")), format!("{keep}/{ch}.wav"));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
