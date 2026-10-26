@@ -1,0 +1,12 @@
+[Unit]
+Description=Keep the Sound Blaster on its saved settings
+After=wireplumber.service pipewire-pulse.service
+Wants=wireplumber.service
+
+[Service]
+ExecStart=%h/.local/bin/sbcommand watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

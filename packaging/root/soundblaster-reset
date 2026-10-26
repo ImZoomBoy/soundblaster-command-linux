@@ -1,0 +1,20 @@
+#!/bin/sh
+# Switches the Creative Sound Blaster (PCI 1102:0012, CA0132) off and on again:
+#   pre  - before sleep (unbind from snd_hda_intel)
+#   post - after waking (bind again)
+#   now  - reset immediately (used by the app's "Reset the sound card")
+DRV=/sys/bus/pci/drivers/snd_hda_intel
+DEV=""
+for d in /sys/bus/pci/devices/*; do
+  if [ "$(cat "$d/vendor" 2>/dev/null)" = 0x1102 ] && [ "$(cat "$d/device" 2>/dev/null)" = 0x0012 ]; then
+    DEV=$(basename "$d")
+  fi
+done
+[ -n "$DEV" ] || exit 0
+case "$1" in
+  pre)  if [ -e "$DRV/$DEV" ]; then echo "$DEV" > "$DRV/unbind"; logger -t soundblaster-reset "switched off $DEV before sleep"; fi ;;
+  post) if [ ! -e "$DRV/$DEV" ]; then echo "$DEV" > "$DRV/bind"; logger -t soundblaster-reset "switched on $DEV after waking"; fi ;;
+  now)  if [ -e "$DRV/$DEV" ]; then echo "$DEV" > "$DRV/unbind"; sleep 1; fi
+        echo "$DEV" > "$DRV/bind"; logger -t soundblaster-reset "reset $DEV" ;;
+esac
+exit 0

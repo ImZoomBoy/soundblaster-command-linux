@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1a0a2e"/><stop offset=".55" stop-color="#5b0f2e"/><stop offset="1" stop-color="#ff416c"/></linearGradient>
+<radialGradient id="s" cx=".72" cy=".3" r=".5"><stop offset="0" stop-color="#ffd27a" stop-opacity=".9"/><stop offset="1" stop-color="#ffd27a" stop-opacity="0"/></radialGradient></defs>
+<rect width="600" height="600" fill="url(#g)"/><circle cx="430" cy="180" r="260" fill="url(#s)"/>
+<g stroke="#fff" stroke-opacity=".85" stroke-width="5" stroke-linecap="round">
+<path d="M60 420 V380 M85 420 V350 M110 420 V300 M135 420 V340 M160 420 V260 M185 420 V310 M210 420 V230 M235 420 V290 M260 420 V250 M285 420 V320 M310 420 V200 M335 420 V280 M360 420 V240 M385 420 V330 M410 420 V270 M435 420 V350 M460 420 V300 M485 420 V370 M510 420 V340 M535 420 V390"/></g>
+<text x="60" y="510" font-family="sans-serif" font-size="44" font-weight="800" fill="#fff" letter-spacing="2">AFTERGLOW</text>
+<text x="60" y="548" font-family="sans-serif" font-size="20" fill="#fff" fill-opacity=".7" letter-spacing="6">THE MIDNIGHT STATIC</text></svg>

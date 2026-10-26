@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Sound Blaster Command
+GenericName=Sound card control panel
+Comment=SBX effects, equaliser, speaker setup and live levels for the Sound Blaster ZxR
+Exec=sbcommand
+Icon=com.local.sbcommand
+Categories=AudioVideo;Audio;Mixer;
+Keywords=sound;blaster;creative;zxr;equaliser;equalizer;surround;sbx;5.1;
+StartupWMClass=com.local.sbcommand
+Terminal=false
