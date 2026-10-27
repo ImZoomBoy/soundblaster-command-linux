@@ -783,12 +783,10 @@ pub fn bass_boost(s: &Settings) -> Vec<f64> {
     BAND_HZ.iter().map(|f| if *f <= xover { gain } else if *f <= xover * 2.0 { gain / 2.0 } else { 0.0 }).collect()
 }
 
-/// The EQ curve sent to the card, and whether the EQ is on. With SBX off
-/// (Pure) the equaliser is bypassed too: every channel exactly as mixed.
+/// The EQ curve sent to the card, and whether the EQ is on. Pure (SBX off)
+/// turns off the SBX effects, Bass and Scout Mode included, and keeps the
+/// equaliser, as SBX and the equaliser are separate switches in Creative's app.
 pub fn effective_eq(s: &Settings) -> (Vec<i32>, bool) {
-    if !s.sbx_active() {
-        return (vec![0; 10], false);
-    }
     let base: Vec<i32> = if s.scout && s.sbx_active() {
         SCOUT_EQ.to_vec()
     } else if s.eq_enabled {
@@ -796,7 +794,7 @@ pub fn effective_eq(s: &Settings) -> (Vec<i32>, bool) {
     } else {
         vec![0; 10]
     };
-    let boost = bass_boost(s);
+    let boost = if s.sbx_active() { bass_boost(s) } else { vec![0.0; 10] };
     let curve: Vec<i32> = base.iter().zip(&boost).map(|(b, x)| (*b as f64 + x).round() as i32).collect();
     let on = (s.scout && s.sbx_active()) || s.eq_enabled || boost.iter().any(|x| *x != 0.0);
     (curve, on)
@@ -860,7 +858,7 @@ pub fn profile_about(name: &str) -> &'static str {
         "RPG" => "Wide worlds and clear voices for role-playing games",
         "Strategy" => "Clear voices and a calm mix for strategy games",
         "Stadium" => "The biggest, widest sound",
-        "Pure" => "No effects: the sound as it was recorded",
+        "Pure" => "No SBX effects; your equaliser stays on",
         _ => "",
     }
 }
@@ -945,11 +943,16 @@ mod tests {
     }
 
     #[test]
-    fn pure_bypasses_the_equaliser_and_boost_raises_the_card() {
+    fn pure_keeps_the_equaliser_but_not_bass_and_boost_raises_the_card() {
         let mut s = Settings::default();
         s.set_eq("Rock");
+        s.eq_enabled = true;
         s.sbx_enabled = false;
-        assert_eq!(effective_eq(&s), (vec![0; 10], false), "Pure: EQ bypassed");
+        let rock = s.eq_of("Rock");
+        assert_eq!(effective_eq(&s), (rock, true), "Pure keeps the EQ, without the SBX Bass boost");
+        s.eq_enabled = false;
+        assert_eq!(effective_eq(&s), (vec![0; 10], false), "Pure with the EQ off: flat");
+        s.eq_enabled = true;
         s.sbx_enabled = true;
         assert!(effective_eq(&s).1);
         assert_eq!(channel_db(&s, "FL"), 0.0);

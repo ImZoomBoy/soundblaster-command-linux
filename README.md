@@ -50,7 +50,7 @@ one window and works around those defaults.
 - A room view of your speakers with live level meters. Click a speaker to play a test sound on it.
 - What's playing (title, artist, cover art) and the path its sound takes: the app's format, any resampling or
   downmixing by PipeWire, the card's processing, and the speakers it reaches.
-- SBX or Pure mode (Pure turns off every effect and the equaliser), and 5.1 or 2.1 speaker layouts.
+- SBX or Pure mode (Pure turns off the SBX effects; your equaliser stays on), and 5.1 or 2.1 speaker layouts.
 - Stereo can play on the fronts only, the fronts and rears, or every speaker. 5.1 films and games play as mixed.
 - Game, Movie & TV and Music modes, picked automatically when Steam, a film or Spotify starts if you want.
   Settings are remembered per game and app, and the Music EQ can follow each song's genre.
@@ -69,9 +69,9 @@ the poster, progress and a compact signal path (<code>48k · SBX Cinema · 5.1</
 Scout Mode (footsteps and quiet sounds sooner) appears only for games.</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/pure.png" alt="Pure mode: effects and equaliser bypassed"><br>
-<b>Pure.</b> No effects and no equaliser: the knobs and EQ grey out, and the signal path shows the card's
-DSP step as <i>bypassed</i>.</td>
+<td><img src="docs/screenshots/pure.png" alt="Pure mode: SBX effects off, equaliser on"><br>
+<b>Pure.</b> The SBX effects are off and their knobs grey out. The equaliser stays on, as in Creative's
+own app, where SBX and the equaliser are separate switches.</td>
 <td><img src="docs/screenshots/two-one.png" alt="2.1 mode: centre and rears off"><br>
 <b>2.1.</b> Everything on the front speakers and subwoofer. The centre and rears dim and say so.</td>
 </tr>

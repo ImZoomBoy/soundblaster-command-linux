@@ -87,7 +87,7 @@ impl ksni::Tray for Tray {
                 selected: usize::from(!s.sbx_enabled),
                 select: Box::new(|t: &mut Self, i| t.edit(part::FX | part::EQ, false, |s| s.sbx_enabled = i == 0)),
                 options: vec![RadioItem { label: "SBX".into(), ..Default::default() },
-                              RadioItem { label: "Pure (no effects, no EQ)".into(), ..Default::default() }],
+                              RadioItem { label: "Pure (no SBX effects)".into(), ..Default::default() }],
             }.into(),
             SubMenu {
                 label: format!("SBX profile: {cur_style}"),

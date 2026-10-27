@@ -79,10 +79,12 @@ fn steps() -> Vec<Step> {
         act(u, "music").set_active(true);
         Ok(())
     });
-    step!("SBX and Pure: Pure bypasses effects and the equaliser", |u: &Ui| {
+    step!("SBX and Pure: Pure turns the SBX effects off and keeps the equaliser", |u: &Ui| {
         u.pure_btn.set_active(true);
-        check(!s(u).sbx_enabled && !model::effective_eq(&s(u)).1, "Pure should bypass the EQ")?;
+        let eq = s(u).eq_of(&s(u).cur_eq());
+        check(!s(u).sbx_enabled && model::effective_eq(&s(u)) == (eq, s(u).eq_enabled), "Pure should keep the EQ")?;
         check(!u.fx[0].col.is_sensitive(), "knobs should grey out")?;
+        check(u.eq_card.is_sensitive(), "the equaliser should stay usable in Pure")?;
         check(u.mode_desc.label().starts_with("Pure 5.1"), u.mode_desc.label().to_string())?;
         u.sbx_btn.set_active(true);
         check(s(u).sbx_enabled && u.mode_desc.label().starts_with("SBX "), u.mode_desc.label().to_string())

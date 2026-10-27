@@ -129,7 +129,7 @@ pub struct Ui {
     pub eq_preset: gtk::DropDown,
     pub eq_names: RefCell<Vec<String>>,
     pub eq_btns: HashMap<&'static str, gtk::Button>,
-    eq_card: gtk::Box,
+    pub eq_card: gtk::Box,
     pub eq_bands: Vec<gtk::Scale>,
     eq_view: dash::EqCurve,
 
@@ -1889,7 +1889,7 @@ impl Ui {
         let s = self.s.borrow().clone();
         let np = self.np.borrow().clone();
         let esc = |t: &str| glib::markup_escape_text(t).to_string();
-        let eq_tag = if s.sbx_active() && s.eq_enabled && (s.activity == "music" || np.as_ref().is_some_and(|n| n.activity == "music")) {
+        let eq_tag = if s.eq_enabled && (s.activity == "music" || np.as_ref().is_some_and(|n| n.activity == "music")) {
             format!("  ·  <span foreground='#ff8aa3' weight='bold'>EQ {}</span>", esc(&s.cur_eq()))
         } else { String::new() };
         match &np {
@@ -1973,7 +1973,10 @@ impl Ui {
             if s.scout { d += " · Scout"; }
             if s.eq_enabled { d += &format!(" · EQ {}", s.cur_eq()); }
             d
-        } else { "Pure: effects and EQ bypassed".into() };
+        } else if s.eq_enabled {
+            format!("Pure: SBX effects off · EQ {}", s.cur_eq())
+        } else { "Pure: SBX effects off, EQ off".into() };
+        let eq_changes = { let (c, on) = model::effective_eq(&s); on && c.iter().any(|v| *v != 0) };
         let speakers = if hp { "Headphones".to_string() }
             else if s.listen == "21" { "Front left · Front right · Subwoofer".into() }
             else if src_ch <= 2 && s.spread_mode() == "rear" { "Fronts, rears and subwoofer (centre silent)".into() }
@@ -1983,7 +1986,7 @@ impl Ui {
         vec![
             ("same", app, "What the app sends", src_detail),
             (if resample || mixdown || (src_ch <= 2 && s.spreads()) { "changed" } else { "same" }, "PipeWire".into(), "Linux sound server", pw),
-            (if s.sbx_active() { "enhanced" } else { "same" }, "Sound Blaster ZxR".into(), "The card's DSP", dsp),
+            (if s.sbx_active() || eq_changes { "enhanced" } else { "same" }, "Sound Blaster ZxR".into(), "The card's DSP", dsp),
             ("same", if hp { "Headphone amp".into() } else { format!("Analog {} out", s.speaker_config) }, if hp { "Front panel" } else { "Your speakers" }, speakers),
         ]
     }
@@ -2276,8 +2279,7 @@ impl Ui {
         for (sc, v) in self.eq_bands.iter().zip(s.eq_of(&s.cur_eq())) {
             sc.set_value(v as f64);
         }
-        self.eq_card.set_sensitive(sbx);
-        self.eq_card.set_tooltip_text(if sbx { None } else { Some("Pure: the equaliser is bypassed") });
+        // Pure keeps the equaliser (like Creative's app): only the SBX effects go off.
 
         // Mixer
         self.rebuild_mix_rows(&s);
@@ -2349,7 +2351,7 @@ impl Ui {
 pub fn mode_description(s: &Settings) -> String {
     let p = s.cur_profile();
     if s.headphones() {
-        return if s.sbx_active() { format!("Headphones: stereo, with SBX {p}.") } else { "Headphones: stereo, exactly as mixed.".into() };
+        return if s.sbx_active() { format!("Headphones: stereo, with SBX {p}.") } else { "Headphones: stereo, no SBX effects.".into() };
     }
     let stereo = match s.spread_mode() {
         "rear" => " Stereo also plays on the rear speakers.",
@@ -2359,9 +2361,9 @@ pub fn mode_description(s: &Settings) -> String {
     let d = match (s.sbx_active(), s.listen == "21") {
         (true, false) => format!("SBX {p} on all six speakers. Films and games play each sound from its own speaker."),
         (true, true) => format!("SBX {p} on the front speakers and subwoofer only."),
-        (false, false) if s.spreads() => "Pure 5.1: no effects, no equaliser.".into(),
-        (false, false) => "Pure 5.1: every channel exactly as mixed. No effects, no equaliser.".into(),
-        (false, true) => "Pure 2.1: front speakers and subwoofer only, exactly as mixed. No effects, no equaliser.".into(),
+        (false, false) if s.spreads() => "Pure 5.1: no SBX effects. The equaliser stays on.".into(),
+        (false, false) => "Pure 5.1: every channel as mixed, with no SBX effects. The equaliser stays on.".into(),
+        (false, true) => "Pure 2.1: front speakers and subwoofer only, with no SBX effects. The equaliser stays on.".into(),
     };
     format!("{d}{stereo}")
 }

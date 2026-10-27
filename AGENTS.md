@@ -40,6 +40,6 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - `room::SPEAKERS` is ordered FL,FC,FR,LFE,RL,RR; `meters::ORDER` is FL,FR,FC,LFE,RL,RR. Map between them with `ch_index`.
 - "Stereo plays on" (`stereo_on`: front | rear | all) is applied per stream with `pw-cli set-param ... Props` channelmix params (`simple` upmix; `fc-cutoff` 0 = rears only, 100000 = rears and centre; PipeWire's centre low-pass sits at about half the value, so 12000 muffled the centre and 48000+ is flat). `spread_streams` skips nodes named `sbcommand*` except `sbcommand.relabel.out`; the speaker test stream is named `sbcommand.test` so it is never changed mid-play.
-- Pure = SBX off: all effects off and the EQ bypassed (`effective_eq` returns zeros).
+- Pure = SBX off: the five SBX effects (Bass and Scout included) are off and their knobs grey out; the equaliser stays on, as in Creative's app where SBX and the EQ are separate switches (user's choice, 2026-10-27).
 - The tray (ksni) runs in the `watch` process and may fail to register in the first seconds after login; the watch loop retries.
 - The Spotify Flatpak labels its stereo `aux0,aux1`; `relabel_aux_streams` moves such streams through the `sbcommand.relabel` loopback so they can be placed.
