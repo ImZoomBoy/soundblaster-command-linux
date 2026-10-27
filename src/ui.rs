@@ -1165,6 +1165,17 @@ impl Ui {
         self.refresh();
     }
 
+    /// A game with its own Creative profile started (or a different game):
+    /// pick that profile and its EQ, or go back to the usual game ones.
+    pub fn follow_game(&self, source: &str) -> bool {
+        let changed = self.s.borrow_mut().follow_game(source);
+        if changed {
+            self.changed(part::FX | part::EQ);
+            self.refresh();
+        }
+        changed
+    }
+
     pub fn set_style(&self, style: &str) {
         self.s.borrow_mut().set_style(style);
         self.changed(part::FX | part::EQ);
@@ -1214,6 +1225,11 @@ impl Ui {
     fn rebuild_chips(&self, s: &Settings) {
         let mut names: Vec<String> = model::styles_for(&s.activity).iter().map(|x| x.to_string()).collect();
         names.extend(s.fx_profiles.keys().filter(|k| !model::is_fx_builtin(k)).cloned());
+        // A game's own Creative profile shows while it's in use.
+        let cur = s.cur_profile();
+        if model::is_game_profile(&cur) && !names.contains(&cur) {
+            names.push(cur);
+        }
         let key = names.join("|");
         if *self.chips_key.borrow() != key {
             while let Some(c) = self.chips.first_child() {
@@ -1751,14 +1767,26 @@ impl Ui {
             }
         }
         if self.s.borrow().activity == d.activity {
+            if mode == "auto" {
+                let before = self.s.borrow().clone();
+                if self.follow_game(&d.source) {
+                    *self.undo_snapshot.borrow_mut() = Some(before);
+                    let p = self.s.borrow().cur_profile();
+                    self.add_toast(adw::Toast::builder().use_markup(false)
+                        .title(format!("{} is playing: SBX {p}", d.source))
+                        .button_label("Undo").action_name("win.undo-switch").timeout(6).build());
+                }
+            }
             return;
         }
         let label = model::activity_label(d.activity);
         if mode == "auto" {
             *self.undo_snapshot.borrow_mut() = Some(self.s.borrow().clone());
             self.set_activity(d.activity);
+            self.follow_game(&d.source);
+            let p = self.s.borrow().cur_profile();
             self.add_toast(adw::Toast::builder().use_markup(false)
-                .title(format!("{} is playing: switched to {label}", d.source))
+                .title(format!("{} is playing: switched to {label}, SBX {p}", d.source))
                 .button_label("Undo").action_name("win.undo-switch").timeout(6).build());
         } else {
             self.add_toast(adw::Toast::builder().use_markup(false)

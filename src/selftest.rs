@@ -190,7 +190,7 @@ fn steps() -> Vec<Step> {
         u.eq_bands[0].set_value(5.0);
         check(s(u).eq_of("Rock")[0] == 5 && u.eq_btns["Revert"].is_sensitive(), "band edit")?;
         u.eq_btns["Revert"].emit_clicked();
-        check(s(u).eq_of("Rock")[0] == -1, "Rock not reverted to Creative's")?;
+        check(s(u).eq_of("Rock")[0] == 0, "Rock not reverted to Creative's")?;
         check(u.create_copy(false, "Late"), "create failed")?;
         check(s(u).cur_eq() == "Late" && u.eq_names.borrow().contains(&"Late".to_string()), "preset list")?;
         let path = std::env::temp_dir().join(format!("sbc-selftest-eq-{}.json", std::process::id()));

@@ -328,12 +328,22 @@ fn background_switch(d: detect::Detection) {
         return;
     }
     if s.activity == d.activity || s.auto_mode == "off" {
+        // Same activity: a game may still have its own Creative profile.
+        if s.auto_mode == "auto" && s.follow_game(&d.source) && s.save().is_ok() {
+            let _ = apply(&s, part::FX | part::EQ);
+            let _ = notify(&["-t", "3000", "-u", "low", "-h", "boolean:transient:true",
+                &format!("{} is playing", d.source), &format!("SBX {} · EQ {}", s.cur_profile(), s.cur_eq())]);
+        }
         return;
     }
     let label = crate::model::activity_label(d.activity);
     let body = format!("{} is playing", d.source);
     if s.auto_mode == "auto" {
         if switch_to(d.activity) {
+            let mut s = Settings::load();
+            if s.follow_game(&d.source) && s.save().is_ok() {
+                let _ = apply(&s, part::FX | part::EQ);
+            }
             eprintln!("sbcommand: switched to {label} for {}", d.source);
             let _ = notify(&["-t", "3000", "-u", "low", "-h", "boolean:transient:true", &format!("Switched to {label}"), &body]);
         }

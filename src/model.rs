@@ -85,40 +85,149 @@ fn fx(sur: (bool, i32), cry: (bool, i32), bass: (bool, i32), svm: (bool, i32, &s
     }
 }
 
-/// Creative never published its SBX profile values; these are close approximations.
+/// Creative's SBX profiles for the ZxR, exactly as Sound Blaster Command
+/// 3.4.98 ships them (Product/ZxR/Profiles/*.json, the speaker settings).
+/// Levels 0-100; Bass crossover 80 Hz in all of them.
 pub fn fx_builtin() -> Vec<(&'static str, Fx)> {
-    let off = (false, 50);
-    let svm = (false, 74, "Normal");
     vec![
-        ("Gaming", fx((true, 67), (true, 50), (true, 50), svm, off)),
-        ("Cinema", fx((true, 60), (true, 40), (true, 60), svm, (true, 50))),
-        ("Concert", fx((true, 80), (true, 60), (true, 40), svm, off)),
-        ("Night", fx((true, 50), off, (true, 25), (true, 60, "Night"), (true, 60))),
-        ("Music", fx((false, 67), (true, 55), (true, 45), svm, off)),
-        ("FPS", fx((true, 75), (true, 60), off, svm, (true, 30))),
-        ("Racing", fx((true, 60), (true, 50), (true, 70), svm, off)),
-        ("RPG", fx((true, 70), (true, 50), (true, 50), svm, (true, 40))),
-        ("Strategy", fx((true, 50), (true, 40), off, svm, (true, 50))),
-        ("Stadium", fx((true, 100), (true, 60), (true, 60), svm, off)),
+        ("Gaming", fx((true, 67), (true, 30), (true, 10), (true, 74, "Normal"), (false, 50))),
+        ("Cinema", fx((true, 67), (true, 55), (true, 20), (true, 74, "Normal"), (false, 50))),
+        ("Concert", fx((true, 67), (true, 50), (true, 40), (true, 60, "Normal"), (false, 50))),
+        ("Night", fx((true, 67), (true, 55), (true, 20), (true, 74, "Night"), (true, 30))),
+        // This app's own: Creative has no profile for plain studio music.
+        ("Music", fx((false, 67), (true, 55), (true, 45), (false, 74, "Normal"), (false, 50))),
+        ("FPS", fx((true, 12), (true, 65), (true, 20), (true, 20, "Normal"), (false, 50))),
+        ("Racing", fx((true, 30), (false, 50), (true, 20), (true, 40, "Normal"), (true, 30))),
+        ("RPG", fx((true, 35), (false, 50), (true, 20), (true, 30, "Normal"), (true, 15))),
+        ("Strategy", fx((false, 67), (true, 30), (false, 50), (true, 50, "Normal"), (false, 50))),
+        ("Stadium", fx((true, 40), (false, 50), (false, 50), (true, 74, "Normal"), (true, 30))),
+        ("Adventure", fx((true, 30), (true, 20), (false, 50), (true, 30, "Normal"), (false, 50))),
+        // Creative's game-specific profiles, picked when that game runs.
+        ("Apex Legends", fx((true, 20), (true, 30), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("Arena of Valor", fx((true, 50), (true, 30), (true, 40), (true, 30, "Normal"), (false, 50))),
+        ("Battlefield 1", fx((true, 67), (true, 20), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("CoD: Infinite Warfare", fx((true, 67), (true, 20), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("Counter-Strike", fx((true, 67), (true, 20), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("Dota 2", fx((true, 40), (true, 20), (false, 50), (true, 30, "Normal"), (false, 50))),
+        ("Fortnite", fx((true, 55), (true, 40), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("League of Legends", fx((false, 67), (false, 50), (false, 50), (false, 74, "Normal"), (true, 30))),
+        ("Metal Gear Solid V", fx((true, 50), (true, 30), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("Overwatch", fx((true, 67), (true, 20), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("PUBG", fx((true, 45), (true, 30), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("Project CARS", fx((true, 40), (true, 50), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("Rocket League", fx((true, 50), (false, 50), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("The Witcher 3", fx((true, 65), (false, 50), (false, 50), (true, 30, "Normal"), (false, 50))),
     ]
 }
 
+/// Creative's headphone settings, for the profiles where they differ.
+fn fx_builtin_headphones() -> Vec<(&'static str, Fx)> {
+    vec![
+        ("Arena of Valor", fx((true, 25), (true, 30), (true, 40), (true, 20, "Normal"), (false, 50))),
+        ("Battlefield 1", fx((true, 20), (true, 25), (true, 40), (false, 74, "Normal"), (false, 50))),
+        ("CoD: Infinite Warfare", fx((true, 12), (false, 50), (true, 50), (true, 30, "Normal"), (false, 50))),
+        ("Counter-Strike", fx((false, 67), (true, 30), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("Dota 2", fx((false, 67), (true, 35), (false, 50), (true, 20, "Normal"), (true, 20))),
+        ("Fortnite", fx((true, 25), (true, 50), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("Overwatch", fx((false, 67), (true, 30), (true, 50), (false, 74, "Normal"), (false, 50))),
+        ("PUBG", fx((true, 15), (true, 45), (false, 50), (false, 74, "Normal"), (false, 50))),
+        ("Racing", fx((true, 30), (false, 50), (false, 50), (true, 40, "Normal"), (true, 30))),
+    ]
+}
 
-/// Creative's EQ presets, exactly as the Linux driver has them from
-/// Creative (ca0132_alt_eq_presets), rounded to the card's 1 dB band steps.
-/// Bands: 31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz.
+/// Creative's game-specific profiles and how to recognise each game by name.
+pub const GAME_PROFILES: [(&str, &[&str]); 14] = [
+    ("Apex Legends", &["apex legends"]),
+    ("Arena of Valor", &["arena of valor"]),
+    ("Battlefield 1", &["battlefield 1", "battlefield\u{2122} 1"]),
+    ("CoD: Infinite Warfare", &["infinite warfare"]),
+    ("Counter-Strike", &["counter-strike"]),
+    ("Dota 2", &["dota 2"]),
+    ("Fortnite", &["fortnite"]),
+    ("League of Legends", &["league of legends"]),
+    ("Metal Gear Solid V", &["metal gear solid v"]),
+    ("Overwatch", &["overwatch"]),
+    ("PUBG", &["pubg", "playerunknown"]),
+    ("Project CARS", &["project cars"]),
+    ("Rocket League", &["rocket league"]),
+    ("The Witcher 3", &["witcher 3"]),
+];
+
+/// Creative's profile for a game, from the game's name, if it has one.
+pub fn game_profile_for(source: &str) -> Option<&'static str> {
+    let s = source.to_lowercase();
+    GAME_PROFILES.iter().find(|(_, pats)| pats.iter().any(|p| s.contains(p))).map(|(n, _)| *n)
+}
+
+pub fn is_game_profile(name: &str) -> bool {
+    GAME_PROFILES.iter().any(|(n, _)| *n == name)
+}
+
+
+/// Creative's EQ presets, as Sound Blaster Command 3.4.98 ships them for the
+/// ZxR (Product/ZxR/Presets/EQ/*.json, speaker curves; the music presets have
+/// the same curve for headphones), rounded to the card's 1 dB band steps,
+/// halves away from zero. Bands: 31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz.
 pub fn eq_builtin() -> Vec<(&'static str, [i32; 10])> {
     vec![
         ("Flat", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-        ("Acoustic", [0, 1, 2, 0, 0, 0, 0, 2, 2, 2]),     // 0, 1.1, 2, 0, 0, 0, 0, 2, 2, 2
-        ("Classical", [0, 6, 6, 3, 0, 0, 0, 0, 3, 3]),    // 0, 6, 6, 3.1, …, 3.1, 3.1
-        ("Country", [-1, 0, 1, 1, 1, 0, 0, 2, 3, 4]),     // -1.2, 0, 1.3, 1.3, 1.1, 0, 0, 2, 3.1, 4
-        ("Dance", [-1, 2, 3, 4, -1, -1, 0, 0, 4, 4]),     // -1.2, 2, 3.1, 4.2, -1.2, -1.2, 0, 0, 4, 4
-        ("Jazz", [0, 0, 1, 4, 4, 4, 0, 1, 3, 3]),         // 0, 0, 1.1, 4, 4, 4, 0, 1.1, 3.1, 3.1
-        ("New Age", [0, 2, 2, 0, 0, 0, 1, 2, 2, 2]),      // 0, 2, 2, 0, 0, 0, 1.1, 2, 2, 2
-        ("Pop", [-2, 0, 2, 2, 0, -1, -1, 0, 3, 6]),       // -1.6, 0, 2, 2, 0, -1.2, -1.2, 0, 3.1, 6
-        ("Rock", [-1, -1, 1, 2, -1, -1, 0, 0, 4, 4]),     // -1.2, -1.2, 1.1, 2, -1.2, -1.2, 0, 0, 4, 4
-        ("Vocal", [-2, -1, -1, 0, 3, 4, 3, 0, 0, 1]),     // -2, -1.2, -1.2, 0, 3.1, 4, 3.1, 0, 0, 1.1
+        ("Acoustic", [0, 0, 2, 0, 0, 3, 2, 2, 2, 3]),  // 0 0 2 0 0 2.5 2 2 2 3
+        ("Classical", [0, 0, 2, 2, 1, 3, 1, 0, 3, 3]),  // 0 0 1.5 2 1 3 1 0 3 3
+        ("Country", [0, 0, 0, 0, 2, 3, 3, 2, 3, 3]),  // 0 0 0 0 2 2.5 2.5 2 3 3
+        ("Dance", [0, 0, 1, 2, 1, 2, 2, 1, 3, 3]),  // 0 0 1 1.5 0.5 1.5 2 1 2.5 2.5
+        ("Hip Hop", [0, 0, 2, 3, 2, 3, 0, -3, -1, -2]),  // 0 0 2 2.5 1.5 2.5 0 -2.5 -1 -1.5
+        ("Jazz", [0, 0, 0, 3, 3, 3, 1, 1, 3, 3]),  // 0 0 0 2.5 2.5 3 1 1 3 3
+        ("Pop", [0, 0, 1, 1, 0, 3, 1, 1, 3, 3]),  // 0 0 1 1 0 2.5 0.5 0.5 3 3
+        ("R&B", [0, 0, 0, -2, 3, 2, 2, 0, 2, 1]),  // 0 0 0 -1.5 2.5 1.5 2 0 2 1
+        ("Rock", [0, 0, 2, 1, 0, 3, 1, -1, 3, 3]),
+        // The Linux driver's Rock (older Creative values), kept to compare.
+        ("Rock (classic)", [-1, -1, 1, 2, -1, -1, 0, 0, 4, 4]),
+        ("Vocal", [0, 0, -2, -1, 3, 3, 3, 0, 0, 1]),  // 0 0 -1.5 -0.5 3 3 3 0 0 1
+        ("Gaming", [0, 0, 3, -2, 0, 3, 0, 0, 3, 2]),
+        ("Cinema", [0, 0, 0, 0, 2, 3, 0, 0, 1, 1]),
+        ("Concert", [0, 0, 0, 0, 0, 0, 0, -1, 3, -5]),
+        ("Night", [0, 0, 0, 0, 0, 0, 0, -1, 3, -5]),
+    ]
+}
+
+/// Creative's EQ for each game-specific profile (speakers). Listed only while
+/// that game's profile is in use.
+pub fn eq_games() -> Vec<(&'static str, [i32; 10])> {
+    vec![
+        ("Apex Legends", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        ("Arena of Valor", [2, 2, 2, -2, -2, 2, 2, -3, 2, 0]),
+        ("Battlefield 1", [0, -2, 0, -2, -2, 2, 2, -3, 0, 3]),
+        ("CoD: Infinite Warfare", [0, 5, -2, -3, -2, 0, 3, -5, -3, -2]),
+        ("Counter-Strike", [2, 3, 2, -2, 1, 2, 2, -4, -2, 2]),
+        ("Dota 2", [2, 3, 2, -2, -2, 2, -3, 0, 0, 0]),
+        ("Fortnite", [0, 2, -2, -2, 0, 0, 3, -2, 2, 0]),
+        ("League of Legends", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        ("Metal Gear Solid V", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        ("Overwatch", [2, 3, 2, -2, 2, 2, 2, -4, 2, 2]),
+        ("PUBG", [0, 3, -4, -4, 0, 2, 2, 0, 2, 0]),
+        ("Project CARS", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        ("Rocket League", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        ("The Witcher 3", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    ]
+}
+
+/// Creative's headphone curves for the game EQs.
+fn eq_games_headphones() -> Vec<(&'static str, [i32; 10])> {
+    vec![
+        ("Apex Legends", [2, 3, -1, 0, -2, 0, 2, -3, 2, 0]),
+        ("Arena of Valor", [0, 2, 2, -2, 2, 1, 2, -2, 1, 2]),
+        ("Battlefield 1", [2, 3, -1, 0, 0, 3, 2, 0, 2, 2]),
+        ("CoD: Infinite Warfare", [0, 3, -2, -2, -2, -2, 3, -1, 1, 2]),
+        ("Counter-Strike", [-4, 3, -3, -3, -2, -2, 2, -1, 0, 3]),
+        ("Dota 2", [0, 2, -2, -2, -2, 2, 0, 2, 2, 2]),
+        ("Fortnite", [2, 2, -2, -2, 0, 0, 2, -2, 0, 0]),
+        ("League of Legends", [-3, 0, -3, -4, -5, -1, -3, -2, 2, 0]),
+        ("Metal Gear Solid V", [2, 2, -2, 1, 1, 1, 2, -1, -1, 0]),
+        ("Overwatch", [2, 4, 1, -2, -1, 2, 3, 2, 2, 2]),
+        ("PUBG", [3, 3, -2, -2, 0, 0, 3, -3, 0, 3]),
+        ("Project CARS", [0, 3, 0, 2, 2, 0, 2, 0, -1, -1]),
+        ("Rocket League", [3, 3, -2, 2, 2, 0, 2, 0, -2, 0]),
+        ("The Witcher 3", [3, 4, -2, 0, 0, 2, 2, 0, -2, 0]),
     ]
 }
 
@@ -127,7 +236,7 @@ pub fn eq_names() -> Vec<&'static str> {
 }
 
 pub fn is_eq_builtin(name: &str) -> bool {
-    eq_builtin().iter().any(|(n, _)| *n == name)
+    eq_builtin().iter().chain(eq_games().iter()).any(|(n, _)| *n == name)
 }
 
 pub fn is_fx_builtin(name: &str) -> bool {
@@ -279,7 +388,7 @@ pub const ACTIVITIES: [(&str, &str, &str, &str); 3] = [
 /// Creative's SBX profiles offered for each activity. The first is the default.
 pub fn styles_for(a: &str) -> &'static [&'static str] {
     match a {
-        "game" => &["Gaming", "FPS", "Racing", "RPG", "Strategy"],
+        "game" => &["Gaming", "FPS", "Racing", "RPG", "Strategy", "Adventure"],
         "movie" => &["Cinema", "Night"],
         // "Pure" isn't offered: switching SBX off is the pure sound.
         _ => &["Music", "Concert", "Stadium"],
@@ -361,10 +470,14 @@ impl Settings {
         is_fx_builtin(name) || self.fx_profiles.contains_key(name)
     }
 
-    /// Creative's EQ presets, then your own.
+    /// Creative's EQ presets, then your own; a game's own EQ while it's in use.
     pub fn eq_list(&self) -> Vec<String> {
         let mut v: Vec<String> = eq_names().iter().map(|n| n.to_string()).collect();
         v.extend(self.eq_presets.keys().filter(|k| !is_eq_builtin(k)).cloned());
+        let cur = self.cur_eq();
+        if eq_games().iter().any(|(n, _)| *n == cur) {
+            v.push(cur);
+        }
         v
     }
 
@@ -372,19 +485,22 @@ impl Settings {
         is_eq_builtin(name) || self.eq_presets.contains_key(name)
     }
 
-    /// A preset's bands: your edits if any, otherwise Creative's.
+    /// A preset's bands: your edits if any, otherwise Creative's (its
+    /// headphone curve on headphones, where it has one).
     pub fn eq_of(&self, name: &str) -> Vec<i32> {
         if let Some(c) = self.eq_presets.get(name) {
             return c.clone();
         }
-        eq_builtin().into_iter().find(|(n, _)| *n == name).map_or(vec![0; 10], |(_, c)| c.to_vec())
+        let hp = if self.headphones() { eq_games_headphones() } else { Vec::new() };
+        hp.into_iter().chain(eq_builtin()).chain(eq_games())
+            .find(|(n, _)| *n == name).map_or(vec![0; 10], |(_, c)| c.to_vec())
     }
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            version: 3,
+            version: 4,
             output: "speakers".into(),
             speaker_config: "5.1".into(),
             speaker_type: "desktop".into(),
@@ -461,9 +577,33 @@ impl Settings {
             s.fx_profiles.retain(|name, _| is_fx_builtin(name));
             s.version = 3;
         }
+        if s.version < 4 {
+            // Version 4 uses Creative's Sound Blaster Command presets. The
+            // driver's Rock you used becomes "Rock (classic)"; "New Age" is
+            // gone from Creative's list.
+            let rename = |n: &mut String| {
+                if n == "Rock" {
+                    *n = "Rock (classic)".into();
+                } else if n == "New Age" {
+                    *n = "Flat".into();
+                }
+            };
+            rename(&mut s.eq.speakers);
+            rename(&mut s.eq.headphones);
+            s.eqs.values_mut().for_each(rename);
+            s.app_memory.values_mut().for_each(|m| rename(&mut m.eq));
+            if let Some(c) = s.eq_presets.remove("Rock") {
+                s.eq_presets.insert("Rock (classic)".into(), c);
+            }
+            s.version = 4;
+        }
         // Always on one of the current activity's SBX profiles.
         let a = if ACTIVITIES.iter().any(|x| x.0 == s.activity) { s.activity.clone() } else { "music".to_string() };
-        if s.activity != a || !styles_for(&a).contains(&s.cur_profile().as_str()) {
+        let cur = s.cur_profile();
+        let fits = styles_for(&a).contains(&cur.as_str())
+            || (a == "game" && is_game_profile(&cur))
+            || (s.fx_profiles.contains_key(&cur) && !is_fx_builtin(&cur));
+        if s.activity != a || !fits {
             let cur = s.cur_profile();
             if styles_for(&a).contains(&cur.as_str()) {
                 s.styles.insert(a.clone(), cur);
@@ -600,15 +740,42 @@ impl Settings {
     }
 
 
+    /// A profile's settings: your edits if any, otherwise Creative's (its
+    /// headphone settings on headphones, where they differ).
     pub fn fx_of(&self, name: &str) -> Fx {
         if let Some(f) = self.fx_profiles.get(name) {
             return f.clone();
         }
-        fx_builtin()
-            .into_iter()
+        let hp = if self.headphones() { fx_builtin_headphones() } else { Vec::new() };
+        hp.into_iter()
+            .chain(fx_builtin())
             .find(|(n, _)| *n == name)
+            .or_else(|| fx_builtin().into_iter().find(|(n, _)| *n == "Music"))
             .map(|(_, f)| f)
-            .unwrap_or_else(|| fx_builtin().pop().unwrap().1)
+            .unwrap()
+    }
+
+    /// When a game starts: Creative's own profile and EQ for it if there is
+    /// one, otherwise back to your usual game profile and EQ. Your per-game
+    /// memory (recall_app) comes first. True if anything changed.
+    pub fn follow_game(&mut self, source: &str) -> bool {
+        if self.activity != "game" {
+            return false;
+        }
+        let before = (self.cur_profile(), self.cur_eq());
+        match game_profile_for(source) {
+            Some(p) => {
+                // Only the current profile and EQ: the usual game ones stay as
+                // the defaults for every other game.
+                self.set_cur_profile(p);
+                self.eq.speakers = p.into();
+                self.eq.headphones = p.into();
+                self.eq_enabled = true;
+            }
+            None if is_game_profile(&self.cur_profile()) => self.set_activity("game"),
+            None => {}
+        }
+        before != (self.cur_profile(), self.cur_eq())
     }
 
 
@@ -848,17 +1015,19 @@ pub fn channel_db(s: &Settings, ch: &str) -> f64 {
 /// What each built-in profile is for, in a few words.
 pub fn profile_about(name: &str) -> &'static str {
     match name {
-        "Gaming" => "Wider sound, crisp detail and fuller bass for all kinds of games",
-        "Cinema" => "Wide surround, extra bass and clearer voices for films and TV",
-        "Concert" => "A big, wide stage for live music",
-        "Night" => "No sudden loud bangs, clear voices and gentle bass for late nights",
-        "Music" => "Extra detail and bass for music",
-        "FPS" => "Wide sound and sharp detail for shooters, without booming bass",
-        "Racing" => "Engine rumble and a wide track for racing games",
-        "RPG" => "Wide worlds and clear voices for role-playing games",
-        "Strategy" => "Clear voices and a calm mix for strategy games",
-        "Stadium" => "The biggest, widest sound",
+        "Gaming" => "Creative's: wide surround, detail and even loudness for all kinds of games",
+        "Cinema" => "Creative's: wide surround, detail and even loudness for films and TV",
+        "Concert" => "Creative's: a wide, lively stage for live and party music",
+        "Night" => "Creative's: no sudden loud bangs, and clearer voices, for late nights",
+        "Music" => "This app's own: detail and bass without surround, for studio albums (Creative has none for this)",
+        "FPS" => "Creative's: sharp detail for hearing every step, with little surround",
+        "Racing" => "Creative's: clear engines and voices, with a light surround",
+        "RPG" => "Creative's: open worlds and clear voices for role-playing games",
+        "Strategy" => "Creative's: a clear, even mix for real-time strategy",
+        "Stadium" => "Creative's: a big open sound with clear voices, no added bass",
+        "Adventure" => "Creative's: Adventure & Action, a light surround for action games",
         "Pure" => "No SBX effects; your equaliser stays on",
+        g if is_game_profile(g) => "Creative's profile for this game, picked when it runs",
         _ => "",
     }
 }
@@ -890,7 +1059,63 @@ mod tests {
         assert_eq!(s.cur_profile(), "Music");
         assert!(s.fx_of("Music").surround.0, "your own tweak to Creative's Music is kept");
         assert!(!s.fx_profiles.contains_key("Boom") && !s.fx_profiles.contains_key("Everyday: Music"));
-        assert!(s.upmix && s.version == 3, "stereo on all speakers is kept");
+        assert!(s.upmix && s.version == 4, "stereo on all speakers is kept");
+    }
+
+    #[test]
+    fn version_3_rock_becomes_rock_classic() {
+        let old = r#"{"version":3,"activity":"music","eq":{"speakers":"Rock","headphones":"Rock"},
+        "eqs":{"music":"Rock","movie":"New Age"},"app_memory":{"Spotify":{"activity":"music","profile":"Music","eq":"Rock"}}}"#;
+        let dir = std::env::temp_dir().join(format!("sbc-model-test-v3-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("settings.json"), old).unwrap();
+        // SAFETY: tests in this module don't read SBCOMMAND_CONFIG_DIR concurrently.
+        unsafe { std::env::set_var("SBCOMMAND_CONFIG_DIR", &dir) };
+        let s = Settings::load();
+        unsafe { std::env::remove_var("SBCOMMAND_CONFIG_DIR") };
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(s.cur_eq(), "Rock (classic)", "the Rock you had keeps sounding the same");
+        assert_eq!(s.eqs.get("music").map(String::as_str), Some("Rock (classic)"));
+        assert_eq!(s.eqs.get("movie").map(String::as_str), Some("Flat"), "New Age is gone from Creative's list");
+        assert_eq!(s.app_memory["Spotify"].eq, "Rock (classic)");
+        assert_eq!(s.version, 4);
+    }
+
+    #[test]
+    fn profiles_are_creatives_exact_values() {
+        let mut s = Settings::default();
+        let st = s.fx_of("Stadium");
+        assert_eq!((st.surround, st.crystalizer.0, st.bass.0, (st.smart_volume.0, st.smart_volume.1), st.dialog),
+                   ((true, 40), false, false, (true, 74), (true, 30)), "Creative's Stadium");
+        let c = s.fx_of("Concert");
+        assert_eq!((c.surround, c.crystalizer, c.bass, c.smart_volume.1), ((true, 67), (true, 50), (true, 40), 60));
+        assert_eq!(s.fx_of("Night").smart_volume.2, "Night");
+        assert_eq!(s.fx_of("Counter-Strike").surround, (true, 67), "speakers");
+        s.output = "headphones".into();
+        assert_eq!(s.fx_of("Counter-Strike").surround.0, false, "Creative's headphone settings differ");
+        assert_eq!(s.fx_of("Stadium").surround, (true, 40), "same for both when Creative has one set");
+        assert!(styles_for("music").contains(&"Music") && !styles_for("game").contains(&"Counter-Strike"));
+    }
+
+    #[test]
+    fn a_game_with_its_own_profile_gets_it_then_others_go_back() {
+        assert_eq!(game_profile_for("Counter-Strike 2"), Some("Counter-Strike"));
+        assert_eq!(game_profile_for("The Witcher 3: Wild Hunt"), Some("The Witcher 3"));
+        assert_eq!(game_profile_for("Portal 2"), None);
+        let mut s = Settings::default();
+        s.set_activity("game");
+        s.set_style("FPS");
+        s.set_eq("Gaming");
+        assert!(s.follow_game("Counter-Strike 2"));
+        assert_eq!((s.cur_profile(), s.cur_eq()), ("Counter-Strike".to_string(), "Counter-Strike".to_string()));
+        assert_eq!(s.eq_of("Counter-Strike"), vec![2, 3, 2, -2, 1, 2, 2, -4, -2, 2], "Creative's game EQ");
+        assert!(s.eq_list().contains(&"Counter-Strike".to_string()), "listed while in use");
+        assert_eq!(s.style_of("game"), "FPS", "your usual game profile stays the default");
+        assert!(s.follow_game("Portal 2"), "a game without its own profile goes back");
+        assert_eq!((s.cur_profile(), s.cur_eq()), ("FPS".to_string(), "Gaming".to_string()));
+        assert!(!s.eq_list().contains(&"Counter-Strike".to_string()));
+        s.set_activity("music");
+        assert!(!s.follow_game("Counter-Strike 2"), "only in Game");
     }
 
     #[test]
@@ -931,10 +1156,12 @@ mod tests {
         s.output = "headphones".into(); // no Bass-through-EQ on headphones
         assert_eq!(effective_eq(&s), (vec![0; 10], true), "Flat, on");
         s.set_eq("Rock");
-        assert_eq!(effective_eq(&s).0, vec![-1, -1, 1, 2, -1, -1, 0, 0, 4, 4], "Creative's Rock");
+        assert_eq!(effective_eq(&s).0, vec![0, 0, 2, 1, 0, 3, 1, -1, 3, 3], "Creative's Rock (Sound Blaster Command)");
+        s.set_eq("Rock (classic)");
+        assert_eq!(effective_eq(&s).0, vec![-1, -1, 1, 2, -1, -1, 0, 0, 4, 4], "the driver's Rock, kept to compare");
         assert_eq!(eq_pairs(&s)[1].1, V::I(23), "driver offset");
         s.set_eq("Made up");
-        assert_eq!(s.cur_eq(), "Rock", "unknown names are ignored");
+        assert_eq!(s.cur_eq(), "Rock (classic)", "unknown names are ignored");
         s.eq_presets.insert("Mine".into(), vec![3; 10]);
         s.set_eq("Mine");
         assert_eq!(effective_eq(&s).0, vec![3; 10], "your own preset");

@@ -44,9 +44,14 @@ one window and works around those defaults.
 
 - Creative's SBX effects: Surround, Crystalizer, Bass, Smart Volume and Dialog+, each with an on/off switch and a
   level knob.
-- All ten of Creative's profiles (Gaming, FPS, Racing, RPG, Strategy, Cinema, Night, Music, Concert, Stadium) with
-  the same values as the Windows app. You can add your own and import or export them.
-- A 10-band equaliser you adjust by dragging, with Creative's ten presets taken from the driver.
+- Creative's SBX profiles with their exact values from Creative's Sound Blaster Command for Windows (Gaming,
+  Cinema, Concert, Night, FPS, Racing, RPG, Strategy, Stadium, Adventure), separate speaker and headphone values
+  where Creative has them, plus this app's own Music profile for studio albums. You can add your own and import
+  or export them.
+- Creative's 14 game-specific profiles (Counter-Strike, Fortnite, Overwatch, Apex Legends and more), picked by
+  themselves when that game runs.
+- A 10-band equaliser you adjust by dragging, with Creative's presets from Sound Blaster Command and the Linux
+  driver's older Rock as "Rock (classic)".
 - A room view of your speakers with live level meters. Click a speaker to play a test sound on it.
 - What's playing (title, artist, cover art) and the path its sound takes: the app's format, any resampling or
   downmixing by PipeWire, the card's processing, and the speakers it reaches.
@@ -124,7 +129,7 @@ These are real problems with the ZxR on a stock Linux system, found while buildi
 | **Centre, sub or rear right silent after a boot, sleep or reset.** The card's sound processor sometimes misses the start-up state of those outputs, and the driver never sends it again. Only a lucky restart brought them back. | Switches those outputs off and on again a couple of seconds after the card starts, so the processor picks them up (all six channels in 8 of 8 test restarts). The [driver patch](driver/README.md) does the same inside the driver. |
 | **Subwoofer crossover wrong.** The driver replaces the bass redirection crossover with the X-Bass one whenever it redoes the speaker setup, so the sub got less bass than set. | Re-sends the crossover after every change. The driver patch fixes the bug itself, and two smaller ones in the same code. |
 | **Settings lost after sleep or a card reset.** The driver resets the card to defaults (2.0, every effect on). | A small background service puts your settings back whenever the card comes back. Optional root helpers add a password-free **Reset the sound card** button. |
-| **Effects and EQ are a wall of ALSA controls.** | Creative's profiles and presets with their real values, read from the driver. |
+| **Effects and EQ are a wall of ALSA controls.** | Creative's profiles and presets with their exact values, read from Creative's own Sound Blaster Command data files. |
 
 ## Supported cards and systems
 
@@ -222,7 +227,7 @@ Tips:
 
 | Module | Does |
 |---|---|
-| `model.rs` | Settings, Creative's SBX profiles and EQ presets (exact driver values), the ALSA control values for each setting, Pure, Speaker boost, per-app memory |
+| `model.rs` | Settings, Creative's SBX profiles and EQ presets (exact values from Sound Blaster Command 3.4.98), game profiles, the ALSA control values for each setting, Pure, Speaker boost, per-app memory |
 | `card.rs` | Writes the card's ALSA controls and hardware levels |
 | `system.rs` | PipeWire / WirePlumber: 5.1 channel order, soft-mixer, extra outputs (2.1, stereo), stream re-labelling, stereo on the rears (per-stream upmix), volume |
 | `worker.rs` | Background thread for all card and audio work; the `watch` service; what's-playing detection |
