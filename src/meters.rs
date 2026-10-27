@@ -122,7 +122,7 @@ pub fn start(send: impl Fn([f32; 6]) + Send + 'static) -> Option<Meter> {
                 t += 1.0;
                 let w = |k: f32| 0.55 + 0.3 * (t / k).sin().abs();
                 let lfe = if (t as i32) % 4 == 0 { 0.85 } else { 0.5 };
-                let (fc, rear) = match spread.as_str() { "rear" => (0.0, 0.7), "all" => (0.8, 0.7), _ => (0.0, 0.0) };
+                let (fc, rear) = match spread.as_str() { "rear" => (0.0, 0.7), _ => (0.0, 0.0) };
                 send(if six { [w(3.0), w(3.4), w(2.6) * 0.95, lfe, w(4.1) * 0.7, w(3.7) * 0.7] }
                      else { [w(3.0), w(3.4), w(3.2) * fc, lfe * 0.8, w(3.0) * rear, w(3.4) * rear] });
                 std::thread::sleep(Duration::from_millis(50));

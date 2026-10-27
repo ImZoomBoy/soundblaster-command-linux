@@ -243,17 +243,19 @@ pub struct Settings {
     pub app_memory: BTreeMap<String, AppMemory>,
     /// Show the tray icon (from the background service).
     pub tray: bool,
-    /// With 5.1 speakers, where stereo plays: "front", "rear" or "all" (see STEREO_ON).
+    /// With 5.1 speakers, where stereo plays: "front" or "rear" (see STEREO_ON).
     pub stereo_on: String,
 }
 
 /// (id, button label, what it means) for where stereo plays on 5.1 speakers.
 /// Measured: rears get a copy of left/right 3 dB quieter; the centre gets
 /// left+right at the fronts' level. 5.1 sources are never changed.
-pub const STEREO_ON: [(&str, &str, &str); 3] = [
+/// No "all": filling the centre with left + right (PipeWire's only way) sounds
+/// hollow and coloured on most stereo recordings, so the centre is left to
+/// real 5.1 sources.
+pub const STEREO_ON: [(&str, &str, &str); 2] = [
     ("front", "Fronts", "Stereo plays on the front speakers only, exactly as mixed."),
     ("rear", "+ Rears", "Stereo also plays on the rear speakers, a little quieter."),
-    ("all", "All", "Stereo also plays on the centre and rear speakers."),
 ];
 
 /// What was last used with one game or app.
@@ -292,14 +294,14 @@ pub const LISTEN_MODES: [(&str, &str, &str); 2] = [
 
 impl Settings {
     /// Where stereo plays with 5.1 speakers: "front" (as mixed), "rear"
-    /// (fronts + rears) or "all" (centre too). Always "front" in 2.1 and on
+    /// (fronts + rears). Always "front" in 2.1 and on
     /// headphones. 5.1 sources are never changed.
     pub fn spread_mode(&self) -> &str {
         if self.headphones() || self.listen == "21" || !channels(&self.speaker_config).contains(&"RL") {
             return "front";
         }
         match self.stereo_on.as_str() {
-            "rear" | "all" => &self.stereo_on,
+            "rear" => &self.stereo_on,
             _ => "front",
         }
     }
@@ -493,6 +495,10 @@ impl Settings {
             self.speaker_type = "desktop".into();
         }
         self.crossover = self.crossover.clamp(50, 200);
+        if self.stereo_on == "all" {
+            // "All" was removed; the closest is fronts + rears.
+            self.stereo_on = "rear".into();
+        }
         if !STEREO_ON.iter().any(|x| x.0 == self.stereo_on) {
             self.stereo_on = "front".into();
         }
@@ -974,7 +980,8 @@ mod tests {
         s.stereo_on = "rear".into();
         assert!(s.spreads() && s.spread_mode() == "rear");
         s.stereo_on = "all".into();
-        assert_eq!(s.spread_mode(), "all");
+        s.sanitise();
+        assert_eq!(s.spread_mode(), "rear", "the removed \"all\" becomes + Rears");
         s.listen = "21".into();
         assert_eq!(s.spread_mode(), "front", "2.1 is fronts and sub only");
         s.listen = "51".into();

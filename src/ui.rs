@@ -1960,7 +1960,6 @@ impl Ui {
             if resample { format!("Resampled {} → {card_rate}", st.as_ref().map(|f| f.rate_text()).unwrap_or_default()) } else { "No resampling".into() },
             if mixdown { format!("Mixed {} → {}", st.as_ref().map(|f| f.layout()).unwrap_or_default(), if hp { "stereo".into() } else if s.listen == "21" { "2.1".to_string() } else { format!("{out_ch} ch") }) }
             else if src_ch <= 2 && s.spread_mode() == "rear" { "Stereo copied to the rear speakers (3 dB quieter)".into() }
-            else if src_ch <= 2 && s.spread_mode() == "all" { "Stereo spread to the centre and rear speakers".into() }
             else if src_ch <= 2 { "Stereo stays on the front speakers".into() } else { "Each channel to its own speaker".into() },
         ].join(" · ");
         let p = s.fx_of(&s.cur_profile());
@@ -1980,7 +1979,6 @@ impl Ui {
         let speakers = if hp { "Headphones".to_string() }
             else if s.listen == "21" { "Front left · Front right · Subwoofer".into() }
             else if src_ch <= 2 && s.spread_mode() == "rear" { "Fronts, rears and subwoofer (centre silent)".into() }
-            else if src_ch <= 2 && s.spread_mode() == "all" { "All six speakers".into() }
             else if src_ch <= 2 { "Front left · Front right · Subwoofer (centre and rears silent)".into() }
             else { "All six speakers".into() };
         vec![
@@ -2001,7 +1999,7 @@ impl Ui {
         let r = st.as_ref().map(|f| f.rate_text().replace(" kHz", "k")).unwrap_or_default();
         let lay = if s.headphones() { "HP".to_string() } else if s.listen == "21" { "2.1".into() }
                   else if st.as_ref().is_some_and(|f| f.channels <= 2) {
-                      match s.spread_mode() { "rear" => "2.0 + rears".into(), "all" => "2.0 → all".into(), _ => "2.0".into() }
+                      match s.spread_mode() { "rear" => "2.0 + rears".into(), _ => "2.0".into() }
                   } else { "5.1".into() };
         let rate = if r.is_empty() || r == "48k" { r } else { format!("{r} → 48k") };
         let sound = if s.sbx_active() { format!("SBX {}", s.cur_profile()) } else { "Pure".into() };
@@ -2180,6 +2178,20 @@ impl Ui {
     // ---- side panels
 
     /// "home" when no side panel is open, else "mixer", "crystalvoice", "setup" or "settings".
+    /// Natural widths of the right-hand column and its top card. The column
+    /// takes the width it asks for and the room gets the rest.
+    pub fn layout_widths(&self) -> (i32, i32) {
+        let mut col = self.mode_desc.parent();
+        while let Some(w) = col.clone() {
+            if w.width_request() == 500 {
+                break;
+            }
+            col = w.parent();
+        }
+        let nat = |w: Option<gtk::Widget>| w.map_or(-1, |w| w.measure(gtk::Orientation::Horizontal, -1).1);
+        (nat(col), nat(self.mode_desc.parent().and_then(|p| p.parent())))
+    }
+
     pub fn current_page(&self) -> String {
         if self.split.shows_sidebar() {
             self.side_stack.visible_child_name().map(|n| n.to_string()).unwrap_or_default()
@@ -2355,7 +2367,6 @@ pub fn mode_description(s: &Settings) -> String {
     }
     let stereo = match s.spread_mode() {
         "rear" => " Stereo also plays on the rear speakers.",
-        "all" => " Stereo plays on all speakers.",
         _ => "",
     };
     let d = match (s.sbx_active(), s.listen == "21") {

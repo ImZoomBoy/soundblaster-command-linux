@@ -101,10 +101,8 @@ fn steps() -> Vec<Step> {
         check(s(u).spread_mode() == "rear" && u.mode_desc.label().contains("rear speakers"), "+ rears")?;
         u.on_now_playing(Some(song()));
         check(u.signal_path()[1].3.contains("copied to the rear") && u.path_label.label().ends_with("2.0 + rears"), "path shows the copy")?;
-        b("all").set_active(true);
-        check(s(u).spread_mode() == "all" && u.signal_path()[3].3 == "All six speakers", "all")?;
         listen(u, "21").set_active(true);
-        check(s(u).spread_mode() == "front" && !b("all").parent().unwrap().parent().unwrap().is_sensitive(), "2.1 never spreads")?;
+        check(s(u).spread_mode() == "front" && !b("rear").parent().unwrap().parent().unwrap().is_sensitive(), "2.1 never spreads")?;
         listen(u, "51").set_active(true);
         b("front").set_active(true);
         check(s(u).spread_mode() == "front", "fronts")?;
@@ -389,29 +387,30 @@ fn steps() -> Vec<Step> {
         }
         Ok(())
     });
-    step!("The window keeps its width: every profile, Pure, stereo option and a long title", |u: &Ui| {
+    step!("The window keeps its size: every profile, Pure, stereo option, volume and a long title", |u: &Ui| {
         // The right-hand column takes the width it asks for (the room gets the
         // rest), so any card in it whose width follows its text moves the whole
         // layout. Its top card holds the changing sentence and the volume.
         let width = |u: &Ui| {
-            let mut col = u.mode_desc.parent();
-            while let Some(w) = col.clone() {
-                if w.width_request() == 500 {
-                    break;
-                }
-                col = w.parent();
-            }
-            let nat = |w: Option<gtk::Widget>| w.map_or(-1, |w| w.measure(gtk::Orientation::Horizontal, -1).1);
-            let right = nat(col);
-            let card = nat(u.mode_desc.parent().and_then(|p| p.parent()));
+            let (right, card) = u.layout_widths();
             let win = u.win.measure(gtk::Orientation::Horizontal, -1).1;
+            let (hmin, _, _, _) = u.win.measure(gtk::Orientation::Vertical, 1240);
             if std::env::var_os("SBCOMMAND_WIDTHS").is_some() {
-                println!("WIDTH window {win} right column {right} top card {card} | {} {}", s(u).cur_profile(), s(u).stereo_on);
+                println!("WIDTH window {win} right column {right} top card {card} height {hmin} | {} {}", s(u).cur_profile(), s(u).stereo_on);
             }
-            (win * 10_000 + right) * 10_000 + card
+            ((win * 10_000 + right) * 10_000 + card) * 10_000 + hmin
         };
         u.on_now_playing(Some(song()));
         let mut seen: Vec<(String, i32)> = vec![("start".into(), width(u))];
+        u.stereo_btns.iter().find(|(i, _)| *i == "rear").unwrap().1.set_active(true);
+        for (a, _, _, _) in model::ACTIVITIES {
+            act(u, a).set_active(true);
+            for n in model::styles_for(a) {
+                chip(u, n).ok_or(format!("no {n} chip"))?.set_active(true);
+                seen.push((format!("{a}/{n} + rears"), width(u)));
+            }
+        }
+        u.stereo_btns.iter().find(|(i, _)| *i == "front").unwrap().1.set_active(true);
         for (a, _, _, _) in model::ACTIVITIES {
             act(u, a).set_active(true);
             for n in model::styles_for(a) {
@@ -423,7 +422,7 @@ fn steps() -> Vec<Step> {
         u.pure_btn.set_active(true);
         seen.push(("Pure".into(), width(u)));
         u.sbx_btn.set_active(true);
-        for id in ["front", "rear", "all"] {
+        for id in ["front", "rear"] {
             u.stereo_btns.iter().find(|(i, _)| *i == id).unwrap().1.set_active(true);
             seen.push((format!("stereo {id}"), width(u)));
         }
