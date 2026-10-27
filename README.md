@@ -5,7 +5,7 @@
 # Sound Blaster Command for Linux
 
 **A native control panel for the Creative Sound Blaster ZxR on Linux.**<br>
-Creative's SBX effects and equaliser, your speakers drawn live in your room, what's playing and the exact path its sound takes to them.
+Creative's SBX effects and profiles, the equaliser, speaker setup and microphone effects, plus fixes for the card's Linux driver.
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-c8102e)](LICENSE)
 ![Rust](https://img.shields.io/badge/Rust-2024-black?logo=rust)
@@ -19,8 +19,8 @@ Creative's SBX effects and equaliser, your speakers drawn live in your room, wha
 
 Creative only makes Sound Blaster Command for Windows. On Linux the ZxR works, but its DSP, equaliser,
 speaker setup and microphone effects are hidden behind dozens of raw ALSA controls, and a few of the
-defaults are actively bad (more on that [below](#what-it-fixes-on-linux)). This app gives you the whole
-card back, in one window that looks like it belongs to a sound card.
+defaults are actively bad (more on that [below](#what-it-fixes-on-linux)). This app puts all of it in
+one window and works around those defaults.
 
 > **Not affiliated with Creative Technology.** "Sound Blaster", "SBX", "CrystalVoice", "Crystalizer" and
 > "Scout Mode" are Creative's trademarks; they're used here only to name the features of their hardware.
@@ -42,25 +42,20 @@ card back, in one window that looks like it belongs to a sound card.
 
 ## Highlights
 
-- 🎛️ **Creative's SBX Pro Studio**: Surround, Crystalizer, Bass, Smart Volume and Dialog+, each with a
-  power LED and a knob you *turn*. All ten of Creative's profiles (Gaming, FPS, Racing, RPG, Strategy, Cinema,
-  Night, Music, Concert, Stadium) with their real values, plus your own: new, rename, revert, import, export.
-- 🔊 **Your room, live**: your speakers drawn at the standard 5.1 angles, each with an LED level meter and
-  ripples when it plays. Click one to hear a test sound.
-- 🎵 **Now playing + signal path**: the song, film or game that's playing (title, artist, album, cover art,
-  progress), and a Roon-style path showing every step its sound takes: the app's format, whether PipeWire
-  resampled or down-mixed it, what the card's DSP did, and which speakers it reaches.
-- 🎚️ **Equaliser you drag**: Creative's ten presets (the exact curves from the driver) or your own, on a
-  10-band graph. A dashed line shows what the card actually plays once SBX Bass is added.
-- 🟢 **SBX or Pure, 5.1 or 2.1**: Pure is every channel exactly as mixed, with no effects and no equaliser.
-  2.1 plays everything on the fronts and subwoofer only.
-- 🔈 **Stereo plays on Fronts, + Rears or All**: like Creative's own app, stereo songs and videos can also
-  play on the rear speakers, or on every speaker including the centre. 5.1 films and games are left as mixed.
-- 🎮 **Game / Movie & TV / Music**: switches by itself when Steam, a film or Spotify starts playing (or just
-  suggests it), remembers your profile and EQ **per game and app**, and can match the Music EQ to each
-  song's genre.
-- 🖥️ **Tray icon** for switching activity, SBX/Pure, profile, EQ, 5.1/2.1 and where stereo plays, without opening the window.
-- 🎙️ **CrystalVoice**, mixer with live meters, **Speaker boost**, speaker setup, headphone gain and more.
+- Creative's SBX effects: Surround, Crystalizer, Bass, Smart Volume and Dialog+, each with an on/off switch and a
+  level knob.
+- All ten of Creative's profiles (Gaming, FPS, Racing, RPG, Strategy, Cinema, Night, Music, Concert, Stadium) with
+  the same values as the Windows app. You can add your own and import or export them.
+- A 10-band equaliser you adjust by dragging, with Creative's ten presets taken from the driver.
+- A room view of your speakers with live level meters. Click a speaker to play a test sound on it.
+- What's playing (title, artist, cover art) and the path its sound takes: the app's format, any resampling or
+  downmixing by PipeWire, the card's processing, and the speakers it reaches.
+- SBX or Pure mode (Pure turns off every effect and the equaliser), and 5.1 or 2.1 speaker layouts.
+- Stereo can play on the fronts only, the fronts and rears, or every speaker. 5.1 films and games play as mixed.
+- Game, Movie & TV and Music modes, picked automatically when Steam, a film or Spotify starts if you want.
+  Settings are remembered per game and app, and the Music EQ can follow each song's genre.
+- A tray icon for the common switches, so you don't need to open the window.
+- CrystalVoice microphone effects, a mixer with meters, speaker boost, speaker setup and headphone gain.
 
 ## Tour
 
