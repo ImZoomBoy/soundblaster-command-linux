@@ -1,0 +1,156 @@
+--- ca0132.c.orig
++++ ca0132.c
+@@ -28,6 +28,17 @@
+ 
+ #include "ca0132_regs.h"
+ 
++/*
++ * ZxR: re-send the centre/LFE and surround converter amps once the DSP is
++ * running, see zxr_wake_surround_outputs().
++ */
++static bool zxr_wake_outputs = true;
++module_param(zxr_wake_outputs, bool, 0644);
++MODULE_PARM_DESC(zxr_wake_outputs, "ZxR: re-send the centre/LFE/surround amps after start-up, so the DSP applies them (default on)");
++static unsigned int zxr_wake_delay_ms = 1500;
++module_param(zxr_wake_delay_ms, uint, 0644);
++MODULE_PARM_DESC(zxr_wake_delay_ms, "ZxR: how long after start-up to re-send them (ms, default 1500)");
++
+ /* Enable this to see controls for tuning purpose. */
+ #define ENABLE_TUNING_CONTROLS
+ 
+@@ -1137,6 +1148,7 @@
+ 
+ 	struct hda_codec *codec;
+ 	struct delayed_work unsol_hp_work;
++	struct delayed_work zxr_wake_work;
+ 
+ #ifdef ENABLE_TUNING_CONTROLS
+ 	long cur_ctl_vals[TUNING_CTLS_COUNT];
+@@ -4617,9 +4629,13 @@
+ 	if (err < 0)
+ 		return err;
+ 
+-	/* If it is enabled, make sure to set the crossover frequency. */
++	/*
++	 * If it is enabled, make sure to set the crossover frequency: the bass
++	 * redirection one (not the X-Bass one), with the same 10 Hz-per-step
++	 * mapping as the X-Bass slider (index 0 is 10 Hz).
++	 */
+ 	if (tmp) {
+-		tmp = float_xbass_xover_lookup[spec->xbass_xover_freq];
++		tmp = float_xbass_xover_lookup[spec->bass_redirect_xover_freq - 1];
+ 		err = dspio_set_uint_param(codec, 0x96,
+ 				SPEAKER_BASS_REDIRECT_XOVER_FREQ, tmp);
+ 		if (err < 0)
+@@ -5607,8 +5623,9 @@
+ {
+ 	CLASS(snd_hda_power, pm)(codec);
+ 
++	/* The control is 1-100 (10-1000 Hz); index 0 is 10 Hz. */
+ 	dspio_set_param(codec, 0x96, 0x20, SPEAKER_BASS_REDIRECT_XOVER_FREQ,
+-			&(float_xbass_xover_lookup[idx]), sizeof(unsigned int));
++			&(float_xbass_xover_lookup[idx - 1]), sizeof(unsigned int));
+ }
+ 
+ /*
+@@ -9456,6 +9473,58 @@
+ 	}
+ }
+ 
++/*
++ * ZxR: after the DSP starts, it sometimes misses the start-up state of the
++ * centre/LFE (0x03) and surround (0x04) converter amps, and then keeps any mix
++ * of the centre, LFE and rear right outputs silent. It only applies those amps
++ * when they change, and the amp cache skips writes of unchanged values, so
++ * mute and restore them once the DSP is running. Doing it at the end of
++ * ca0132_init() is too early.
++ */
++static void zxr_wake_surround_outputs(struct hda_codec *codec)
++{
++	static const hda_nid_t nids[] = { 0x03, 0x04 };
++	unsigned int i, ch, side, val[ARRAY_SIZE(nids)][2];
++
++	for (i = 0; i < ARRAY_SIZE(nids); i++)
++		for (ch = 0; ch < 2; ch++) {
++			side = AC_AMP_SET_OUTPUT |
++			       (ch ? AC_AMP_SET_RIGHT : AC_AMP_SET_LEFT);
++			val[i][ch] = snd_hda_codec_amp_read(codec, nids[i], ch,
++							    HDA_OUTPUT, 0);
++			snd_hda_codec_write(codec, nids[i], 0,
++					    AC_VERB_SET_AMP_GAIN_MUTE,
++					    side | val[i][ch] | HDA_AMP_MUTE);
++		}
++	msleep(100);
++	for (i = 0; i < ARRAY_SIZE(nids); i++)
++		for (ch = 0; ch < 2; ch++) {
++			side = AC_AMP_SET_OUTPUT |
++			       (ch ? AC_AMP_SET_RIGHT : AC_AMP_SET_LEFT);
++			snd_hda_codec_write(codec, nids[i], 0,
++					    AC_VERB_SET_AMP_GAIN_MUTE,
++					    side | val[i][ch]);
++		}
++	codec_info(codec, "ZxR: centre/LFE/surround outputs re-sent\n");
++}
++
++static void zxr_wake_outputs_delayed(struct work_struct *work)
++{
++	struct ca0132_spec *spec = container_of(to_delayed_work(work),
++						struct ca0132_spec, zxr_wake_work);
++
++	CLASS(snd_hda_power_pm, pm)(spec->codec);
++	zxr_wake_surround_outputs(spec->codec);
++}
++
++/* Cancelled on suspend, so this is also re-armed when a resume finds the DSP loaded. */
++static void zxr_schedule_wake(struct ca0132_spec *spec)
++{
++	if (ca0132_quirk(spec) == QUIRK_ZXR && zxr_wake_outputs)
++		mod_delayed_work(system_wq, &spec->zxr_wake_work,
++				 msecs_to_jiffies(zxr_wake_delay_ms));
++}
++
+ static int ca0132_init(struct hda_codec *codec)
+ {
+ 	struct ca0132_spec *spec = codec->spec;
+@@ -9481,6 +9550,7 @@
+ 		} else {
+ 			if (ca0132_quirk(spec) == QUIRK_SBZ)
+ 				sbz_dsp_startup_check(codec);
++			zxr_schedule_wake(spec);
+ 			return 0;
+ 		}
+ 	}
+@@ -9572,6 +9642,9 @@
+ 		ca0132_pe_switch_set(codec);
+ 	}
+ 
++	if (spec->dsp_state == DSP_DOWNLOADED)
++		zxr_schedule_wake(spec);
++
+ 	return 0;
+ }
+ 
+@@ -9594,6 +9667,7 @@
+ {
+ 	struct ca0132_spec *spec = codec->spec;
+ 
++	cancel_delayed_work_sync(&spec->zxr_wake_work);
+ 	cancel_delayed_work_sync(&spec->unsol_hp_work);
+ 	snd_hda_power_up(codec);
+ 	switch (ca0132_quirk(spec)) {
+@@ -10070,6 +10144,7 @@
+ 	spec->base_exit_verbs = ca0132_base_exit_verbs;
+ 
+ 	INIT_DELAYED_WORK(&spec->unsol_hp_work, ca0132_unsol_hp_delayed);
++	INIT_DELAYED_WORK(&spec->zxr_wake_work, zxr_wake_outputs_delayed);
+ 
+ 	ca0132_init_chip(codec);
+ 
+@@ -10141,6 +10216,7 @@
+ 	if (ca0132_quirk(spec) == QUIRK_GENERIC)
+ 		return 0;
+ 
++	cancel_delayed_work_sync(&spec->zxr_wake_work);
+ 	cancel_delayed_work_sync(&spec->unsol_hp_work);
+ 	return 0;
+ }
