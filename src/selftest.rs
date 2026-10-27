@@ -33,10 +33,6 @@ fn pos(names: &[String], n: &str) -> u32 {
     names.iter().position(|x| x == n).unwrap() as u32
 }
 
-fn listen(u: &Ui, id: &str) -> gtk::ToggleButton {
-    u.listen_btns.iter().find(|(i, _)| *i == id).unwrap().1.clone()
-}
-
 fn song() -> NowPlaying {
     NowPlaying { kind: "Song".into(), activity: "music", app: "Spotify".into(), title: "Do I Wanna Know?".into(),
         artist: "Arctic Monkeys".into(), album: "AM".into(), length: Some(272.0), position: Some(102.0), playing: true,
@@ -89,21 +85,12 @@ fn steps() -> Vec<Step> {
         u.sbx_btn.set_active(true);
         check(s(u).sbx_enabled && u.mode_desc.label().starts_with("SBX "), u.mode_desc.label().to_string())
     });
-    step!("5.1 and 2.1", |u: &Ui| {
-        listen(u, "21").set_active(true);
-        check(s(u).listen == "21" && u.mode_desc.label().contains("subwoofer only"), "2.1")?;
-        listen(u, "51").set_active(true);
-        check(s(u).listen == "51", "5.1")
-    });
-    step!("Stereo plays on fronts, + rears, or all", |u: &Ui| {
+    step!("Stereo plays on the fronts or + rears", |u: &Ui| {
         let b = |id: &str| u.stereo_btns.iter().find(|(i, _)| *i == id).unwrap().1.clone();
         b("rear").set_active(true);
         check(s(u).spread_mode() == "rear" && u.mode_desc.label().contains("rear speakers"), "+ rears")?;
         u.on_now_playing(Some(song()));
         check(u.signal_path()[1].3.contains("copied to the rear") && u.path_label.label().ends_with("2.0 + rears"), "path shows the copy")?;
-        listen(u, "21").set_active(true);
-        check(s(u).spread_mode() == "front" && !b("rear").parent().unwrap().parent().unwrap().is_sensitive(), "2.1 never spreads")?;
-        listen(u, "51").set_active(true);
         b("front").set_active(true);
         check(s(u).spread_mode() == "front", "fronts")?;
         u.np_gone.set(Some(Instant::now() - Duration::from_secs(20)));
@@ -126,7 +113,7 @@ fn steps() -> Vec<Step> {
         d.unwrap().force_close();
         u.set_output("headphones");
         check(u.out_label.label() == "HEADPHONES" && u.test_rows.borrow().len() == 2, "headphones")?;
-        check(!listen(u, "51").is_sensitive(), "5.1/2.1 make no sense on headphones")?;
+        check(!u.stereo_row.is_sensitive(), "stereo options make no sense on headphones")?;
         u.set_output("speakers");
         check(u.test_rows.borrow().len() == 6, "speakers")
     });

@@ -192,7 +192,9 @@ pub struct Settings {
     pub trim: BTreeMap<String, f64>,
     pub audio_position: Option<Vec<String>>,
     pub upmix: bool,
-    /// Which speakers play: "fill", "51" or "21" (see LISTEN_MODES).
+    /// Always "51" now: stereo plays on the fronts (or + rears) and 5.1 sources
+    /// on every speaker, by itself. 2.1 speakers are set in Speaker setup.
+    /// Kept so older settings files still load.
     /// Separate from SBX, which is `sbx_enabled`.
     pub listen: String,
     pub safe_volume: bool,
@@ -287,17 +289,13 @@ pub fn styles_for(a: &str) -> &'static [&'static str] {
 /// (id, button label, what it means). Separate from the SBX profile.
 /// (id, button label, what it means). Only about which speakers play;
 /// SBX is a separate on/off choice, so any combination works.
-pub const LISTEN_MODES: [(&str, &str, &str); 2] = [
-    ("51", "5.1", "Every sound as mixed. Stereo plays from the front speakers."),
-    ("21", "2.1", "Front left and right plus the subwoofer only, for everything."),
-];
 
 impl Settings {
     /// Where stereo plays with 5.1 speakers: "front" (as mixed), "rear"
     /// (fronts + rears). Always "front" in 2.1 and on
     /// headphones. 5.1 sources are never changed.
     pub fn spread_mode(&self) -> &str {
-        if self.headphones() || self.listen == "21" || !channels(&self.speaker_config).contains(&"RL") {
+        if self.headphones() || !channels(&self.speaker_config).contains(&"RL") {
             return "front";
         }
         match self.stereo_on.as_str() {
@@ -537,16 +535,12 @@ impl Settings {
         if !ACTIVITIES.iter().any(|x| x.0 == self.activity) {
             self.activity = "music".into();
         }
-        // Older listening modes mixed SBX on/off with the speaker choice.
-        match self.listen.as_str() {
-            // "Fill the room" (stereo spread over every speaker) was removed.
-            "sbx" | "fill" => self.listen = "51".into(),
-            "true51" => (self.listen, self.sbx_enabled) = ("51".into(), false),
-            "true21" => (self.listen, self.sbx_enabled) = ("21".into(), false),
-            m if LISTEN_MODES.iter().any(|x| x.0 == m) => {}
-            // Older still: "stereo on every speaker" meant Fill the room.
-            _ => self.listen = "51".into(),
+        // The 5.1 / 2.1 switch was removed: 5.1 already plays each source on
+        // the speakers it was made for. Older modes also carried SBX on/off.
+        if matches!(self.listen.as_str(), "true51" | "true21") {
+            self.sbx_enabled = false;
         }
+        self.listen = "51".into();
         // The upmix file stays on; spreading is switched per stream instead,
         // so changing the listening mode never restarts the audio system.
         self.upmix = true;
@@ -982,9 +976,9 @@ mod tests {
         s.stereo_on = "all".into();
         s.sanitise();
         assert_eq!(s.spread_mode(), "rear", "the removed \"all\" becomes + Rears");
-        s.listen = "21".into();
-        assert_eq!(s.spread_mode(), "front", "2.1 is fronts and sub only");
-        s.listen = "51".into();
+        s.speaker_config = "2.1".into();
+        assert_eq!(s.spread_mode(), "front", "2.1 speakers have no rears");
+        s.speaker_config = "5.1".into();
         s.output = "headphones".into();
         assert_eq!(s.spread_mode(), "front");
         s.output = "speakers".into();
@@ -1066,7 +1060,7 @@ mod tests {
         let mut s = Settings::default();
         s.sanitise();
         assert_eq!(s.listen, "51");
-        for (old_mode, new_mode, sbx) in [("sbx", "51", true), ("fill", "51", true), ("true51", "51", false), ("true21", "21", false)] {
+        for (old_mode, new_mode, sbx) in [("sbx", "51", true), ("fill", "51", true), ("true51", "51", false), ("true21", "51", false), ("21", "51", true)] {
             let mut o = Settings::default();
             o.listen = old_mode.into();
             o.sanitise();
@@ -1075,13 +1069,10 @@ mod tests {
         s.set_activity("movie"); // Cinema: SBX Surround, Crystalizer, X-Bass, Dialog+ on
         let on = |s: &Settings| fx_pairs(s).iter().filter(|(n, v)| n.ends_with("Switch") && *v == V::B(true)).count();
         // Any combination of speakers and SBX works.
-        for m in ["51", "21"] {
-            for sbx in [true, false] {
-                s.listen = m.into();
-                s.sbx_enabled = sbx;
-                assert!(!s.spreads());
-                assert_eq!(on(&s) > 0, sbx, "{m} with SBX {sbx}");
-            }
+        for sbx in [true, false] {
+            s.sbx_enabled = sbx;
+            assert!(!s.spreads());
+            assert_eq!(on(&s) > 0, sbx, "SBX {sbx}");
         }
         s.sbx_enabled = false;
         s.game_footsteps = true;

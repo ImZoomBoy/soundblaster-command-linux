@@ -36,7 +36,7 @@ impl Tray {
     fn summary(&self) -> String {
         let s = &self.s;
         let sound = if s.sbx_active() { format!("SBX {}", s.cur_profile()) } else { "Pure".into() };
-        let spk = if s.headphones() { "Headphones".to_string() } else if s.listen == "21" { "2.1".into() } else { "5.1".into() };
+        let spk = if s.headphones() { "Headphones".to_string() } else { s.speaker_config.clone() };
         format!("{} · {sound} · {spk}", model::activity_label(&s.activity))
     }
 
@@ -120,20 +120,15 @@ impl ksni::Tray for Tray {
         ];
         if !s.headphones() {
             items.push(MenuItem::Separator);
-            items.push(RadioGroup {
-                selected: usize::from(s.listen == "21"),
-                select: Box::new(|t: &mut Self, i| t.edit(part::FX, true, |s| s.listen = if i == 0 { "51" } else { "21" }.into())),
-                options: vec![RadioItem { label: "5.1 · all six speakers".into(), ..Default::default() },
-                              RadioItem { label: "2.1 · fronts and subwoofer".into(), ..Default::default() }],
-            }.into());
-            if s.listen != "21" && model::channels(&s.speaker_config).contains(&"RL") {
+            if model::channels(&s.speaker_config).contains(&"RL") {
                 items.push(SubMenu {
                     label: format!("Stereo plays on: {}", model::STEREO_ON.iter().find(|x| x.0 == s.stereo_on).map_or("Fronts", |x| x.1)),
                     submenu: vec![RadioGroup {
                         selected: model::STEREO_ON.iter().position(|x| x.0 == s.stereo_on).unwrap_or(0),
                         select: Box::new(|t: &mut Self, i| t.edit(0, true, |s| s.stereo_on = model::STEREO_ON[i].0.into())),
-                        options: [("Front speakers", ""), ("Fronts + rears", ""), ("All speakers", "")].iter()
-                            .map(|(l, _)| RadioItem { label: l.to_string(), ..Default::default() }).collect(),
+                        // From the same list as the window, so they can't disagree.
+                        options: model::STEREO_ON.iter()
+                            .map(|(_, l, _)| RadioItem { label: l.to_string(), ..Default::default() }).collect(),
                     }.into()],
                     ..Default::default()
                 }.into());

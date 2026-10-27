@@ -50,7 +50,9 @@ one window and works around those defaults.
 - A room view of your speakers with live level meters. Click a speaker to play a test sound on it.
 - What's playing (title, artist, cover art) and the path its sound takes: the app's format, any resampling or
   downmixing by PipeWire, the card's processing, and the speakers it reaches.
-- SBX or Pure mode (Pure turns off the SBX effects; your equaliser stays on), and 5.1 or 2.1 speaker layouts.
+- SBX or Pure mode (Pure turns off the SBX effects; your equaliser stays on).
+- Each source plays on the speakers it was made for, by itself: a stereo song on the fronts and subwoofer,
+  a 5.1 film, game or track on all six.
 - Stereo can play on the fronts only, or on the fronts and rears. 5.1 films and games play as mixed.
 - Game, Movie & TV and Music modes, picked automatically when Steam, a film or Spotify starts if you want.
   Settings are remembered per game and app, and the Music EQ can follow each song's genre.
@@ -72,8 +74,9 @@ Scout Mode (footsteps and quiet sounds sooner) appears only for games.</td>
 <td><img src="docs/screenshots/pure.png" alt="Pure mode: SBX effects off, equaliser on"><br>
 <b>Pure.</b> The SBX effects are off and their knobs grey out. The equaliser stays on, as in Creative's
 own app, where SBX and the equaliser are separate switches.</td>
-<td><img src="docs/screenshots/two-one.png" alt="2.1 mode: centre and rears off"><br>
-<b>2.1.</b> Everything on the front speakers and subwoofer. The centre and rears dim and say so.</td>
+<td><img src="docs/screenshots/music.png" alt="A stereo song playing on the front speakers and subwoofer"><br>
+<b>Music.</b> A stereo song plays on the front speakers and subwoofer; the centre and rears wait. A 5.1
+track, film or game uses all six speakers by itself.</td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/rears.png" alt="Stereo playing on the front and rear speakers"><br>
@@ -221,7 +224,7 @@ Tips:
 |---|---|
 | `model.rs` | Settings, Creative's SBX profiles and EQ presets (exact driver values), the ALSA control values for each setting, Pure, Speaker boost, per-app memory |
 | `card.rs` | Writes the card's ALSA controls and hardware levels |
-| `system.rs` | PipeWire / WirePlumber: 5.1 channel order, soft-mixer, extra outputs (2.1, stereo), stream re-labelling, stereo on the rears or all speakers (per-stream upmix), volume |
+| `system.rs` | PipeWire / WirePlumber: 5.1 channel order, soft-mixer, extra outputs (2.1, stereo), stream re-labelling, stereo on the rears (per-stream upmix), volume |
 | `worker.rs` | Background thread for all card and audio work; the `watch` service; what's-playing detection |
 | `detect.rs` | Tells Game / Movie & TV / Music from the playing streams, MPRIS players and Steam/Proton/Wine processes |
 | `media.rs` | Now playing: MPRIS metadata, stream format from PipeWire, Steam game names and artwork |

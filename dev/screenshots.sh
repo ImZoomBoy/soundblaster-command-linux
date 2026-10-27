@@ -20,7 +20,6 @@ shot movie "" movie film '{"activity":"movie","styles":{"movie":"Cinema"},"liste
 shot game "" game game '{"activity":"game","styles":{"game":"FPS"},"game_footsteps":true,"listen":"51"}'
 shot pure "" music music "{\"activity\":\"music\",\"sbx_enabled\":false,\"listen\":\"51\",\$ROCK}"
 shot rears "" music music "{\"activity\":\"music\",\"listen\":\"51\",\"stereo_on\":\"rear\",\$ROCK}" rears
-shot two-one "" music music "{\"activity\":\"music\",\"listen\":\"21\",\$ROCK}"
 shot mixer mixer movie film '{"activity":"movie","boost_db":3,"listen":"51"}'
 shot crystalvoice crystalvoice "" music '{"activity":"music","rec":{"voice_clarity":true,"noise_reduction":true,"smart_volume":true,"svm_level":60,"focus":true,"focus_angle":90}}'
 shot setup setup "" music '{"activity":"music","speaker_type":"dtt2200","crossover":140}'

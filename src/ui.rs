@@ -108,9 +108,8 @@ pub struct Ui {
     vol_loading: Cell<bool>,
     pub sbx_btn: gtk::ToggleButton,
     pub pure_btn: gtk::ToggleButton,
-    pub listen_btns: Vec<(&'static str, gtk::ToggleButton)>,
     pub stereo_btns: Vec<(&'static str, gtk::ToggleButton)>,
-    stereo_row: gtk::Box,
+    pub stereo_row: gtk::Box,
     pub mode_desc: gtk::Label,
     pub out_switch: gtk::Button,
 
@@ -470,10 +469,8 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     vtext.append(&out_label);
     vtext.append(&vrow);
     let (mode_seg, mode_btns) = segmented(&["SBX", "Pure"], true);
-    let (listen_seg, lbtns) = segmented(&["5.1", "2.1"], false);
     let segs = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).valign(gtk::Align::Center).build();
     segs.append(&mode_seg);
-    segs.append(&listen_seg);
     let top = gtk::Box::builder().spacing(12).build();
     top.append(&vol_knob);
     top.append(&vtext);
@@ -744,7 +741,6 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     toasts.set_child(Some(&split));
     win.set_content(Some(&toasts));
 
-    let listen_btns: Vec<(&'static str, gtk::ToggleButton)> = vec![("51", lbtns[0].clone()), ("21", lbtns[1].clone())];
     let stereo_btns: Vec<(&'static str, gtk::ToggleButton)> = model::STEREO_ON.iter().map(|x| x.0).zip(sbtns).collect();
     let ui = Rc::new(Ui {
         s: RefCell::new(s),
@@ -759,7 +755,7 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
         path_dots, path_label, path_box, np: RefCell::new(None), np_at: Cell::new(Instant::now()), np_gone: Cell::new(None),
         path_kinds: RefCell::new(vec![]), playing_source: RefCell::new(None),
         vol_adj, vol_label, out_label, mute, vol_loading: Cell::new(false),
-        sbx_btn: mode_btns[0].clone(), pure_btn: mode_btns[1].clone(), listen_btns, stereo_btns, stereo_row, mode_desc, out_switch,
+        sbx_btn: mode_btns[0].clone(), pure_btn: mode_btns[1].clone(), stereo_btns, stereo_row, mode_desc, out_switch,
         chips, style_btns: RefCell::new(vec![]), chips_key: RefCell::new(String::new()), scout_box, scout_sw,
         profile_btns, profile_card, fx,
         eq_on, eq_preset, eq_names: RefCell::new(vec![]), eq_btns, eq_card, eq_bands, eq_view,
@@ -915,10 +911,6 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button) {
     }));
     ui.sbx_btn.connect_toggled(on!(ui, |u, b| if b.is_active() { u.set_sbx(true) }));
     ui.pure_btn.connect_toggled(on!(ui, |u, b| if b.is_active() { u.set_sbx(false) }));
-    for (id, b) in &ui.listen_btns {
-        let id = *id;
-        b.connect_toggled(on!(ui, |u, b| if b.is_active() { u.set_listen(id) }));
-    }
     for (id, b) in &ui.stereo_btns {
         let id = *id;
         b.connect_toggled(on!(ui, |u, b| if b.is_active() { u.set_stereo_on(id) }));
@@ -1198,17 +1190,6 @@ impl Ui {
             s.scout = on && s.activity == "game";
         }
         self.changed(part::FX | part::EQ);
-        self.refresh();
-    }
-
-    pub fn set_listen(&self, mode: &str) {
-        if self.s.borrow().listen == mode {
-            return;
-        }
-        self.s.borrow_mut().listen = mode.into();
-        self.save_now();
-        self.changed(part::FX);
-        self.send(Job::Listen(Box::new(self.s.borrow().clone())));
         self.refresh();
     }
 
@@ -1948,7 +1929,7 @@ impl Ui {
         let st = np.as_ref().and_then(|n| n.stream.clone());
         let app = np.as_ref().map(|n| n.app.clone()).unwrap_or_else(|| "App".into());
         let hp = s.headphones();
-        let out_ch = if hp { 2 } else if s.listen == "21" { 3 } else { model::channels(&s.speaker_config).len() };
+        let out_ch = if hp { 2 } else { model::channels(&s.speaker_config).len() };
         let (src_ch, src_rate) = st.as_ref().map_or((2, 0), |f| (f.channels, f.rate));
         let resample = src_rate != 0 && src_rate != CARD_RATE;
         let mixdown = src_ch > out_ch;
@@ -1958,7 +1939,7 @@ impl Ui {
         let card_rate = crate::media::StreamFmt { rate: CARD_RATE, ..Default::default() }.rate_text();
         let pw = [
             if resample { format!("Resampled {} → {card_rate}", st.as_ref().map(|f| f.rate_text()).unwrap_or_default()) } else { "No resampling".into() },
-            if mixdown { format!("Mixed {} → {}", st.as_ref().map(|f| f.layout()).unwrap_or_default(), if hp { "stereo".into() } else if s.listen == "21" { "2.1".to_string() } else { format!("{out_ch} ch") }) }
+            if mixdown { format!("Mixed {} → {}", st.as_ref().map(|f| f.layout()).unwrap_or_default(), if hp { "stereo".into() } else { format!("{out_ch} ch") }) }
             else if src_ch <= 2 && s.spread_mode() == "rear" { "Stereo copied to the rear speakers (3 dB quieter)".into() }
             else if src_ch <= 2 { "Stereo stays on the front speakers".into() } else { "Each channel to its own speaker".into() },
         ].join(" · ");
@@ -1977,7 +1958,6 @@ impl Ui {
         } else { "Pure: SBX effects off, EQ off".into() };
         let eq_changes = { let (c, on) = model::effective_eq(&s); on && c.iter().any(|v| *v != 0) };
         let speakers = if hp { "Headphones".to_string() }
-            else if s.listen == "21" { "Front left · Front right · Subwoofer".into() }
             else if src_ch <= 2 && s.spread_mode() == "rear" { "Fronts, rears and subwoofer (centre silent)".into() }
             else if src_ch <= 2 { "Front left · Front right · Subwoofer (centre and rears silent)".into() }
             else { "All six speakers".into() };
@@ -1997,10 +1977,11 @@ impl Ui {
         let np = self.np.borrow();
         let st = np.as_ref().and_then(|n| n.stream.clone());
         let r = st.as_ref().map(|f| f.rate_text().replace(" kHz", "k")).unwrap_or_default();
-        let lay = if s.headphones() { "HP".to_string() } else if s.listen == "21" { "2.1".into() }
+        let lay = if s.headphones() { "HP".to_string() }
                   else if st.as_ref().is_some_and(|f| f.channels <= 2) {
                       match s.spread_mode() { "rear" => "2.0 + rears".into(), _ => "2.0".into() }
-                  } else { "5.1".into() };
+                  } else if model::channels(&s.speaker_config).len() < 6 { s.speaker_config.clone() }
+                  else { "5.1".into() };
         let rate = if r.is_empty() || r == "48k" { r } else { format!("{r} → 48k") };
         let sound = if s.sbx_active() { format!("SBX {}", s.cur_profile()) } else { "Pure".into() };
         self.path_label.set_label(&[rate, sound, lay].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" · "));
@@ -2066,7 +2047,7 @@ impl Ui {
         let hp = s.headphones();
         let cfg = model::channels(&s.speaker_config);
         // The room lists the speakers in its own order (FL, FC, FR, LFE, RL, RR).
-        let plays = room::SPEAKERS.map(|(c, _, _)| !hp && cfg.contains(&c) && (s.listen != "21" || matches!(c, "FL" | "FR" | "LFE")));
+        let plays = room::SPEAKERS.map(|(c, _, _)| !hp && cfg.contains(&c));
         let lv = self.levels.get();
         let levels: [f32; 6] = std::array::from_fn(|i| if plays[i] { lv[ch_index(room::SPEAKERS[i].0)] } else { 0.0 });
         let top = if self.np_head.is_visible() { self.np_head.height() as f64 + 40.0 } else { 30.0 };
@@ -2074,7 +2055,7 @@ impl Ui {
             plays, levels, lit: self.room_lit.borrow().clone(), headphones: hp,
             time: self.t0.elapsed().as_secs_f64(), top: top.max(120.0),
             bottom: if self.capsule.is_visible() { 96.0 } else { 30.0 },
-            off_note: if hp { "headphones on" } else if s.listen == "21" { "off in 2.1" } else { "not connected" },
+            off_note: if hp { "headphones on" } else { "not connected" },
         }
     }
 
@@ -2237,17 +2218,13 @@ impl Ui {
         self.vol_label.set_label(&format!("{}%", self.vol_adj.value().round() as i64));
         self.sbx_btn.set_active(s.sbx_enabled);
         self.pure_btn.set_active(!s.sbx_enabled);
-        for (id, b) in &self.listen_btns {
-            b.set_active(*id == s.listen);
-            b.set_sensitive(!hp && s.has_sub());
-        }
         for (id, b) in &self.stereo_btns {
             b.set_active(*id == s.stereo_on);
         }
-        let can_spread = !hp && s.listen != "21" && model::channels(&s.speaker_config).contains(&"RL");
+        let can_spread = !hp && model::channels(&s.speaker_config).contains(&"RL");
         self.stereo_row.set_sensitive(can_spread);
         self.stereo_row.set_tooltip_text(if can_spread { None } else if hp { Some("Headphones are stereo") }
-            else { Some("Only with rear speakers and 5.1 listening") });
+            else { Some("Only with rear speakers (Speaker setup)") });
         self.out_switch.set_child(Some(&{
             let b = gtk::Box::builder().spacing(8).build();
             b.append(&gtk::Image::from_icon_name(if hp { "audio-speakers-symbolic" } else { "audio-headphones-symbolic" }));
@@ -2369,12 +2346,14 @@ pub fn mode_description(s: &Settings) -> String {
         "rear" => " Stereo also plays on the rear speakers.",
         _ => "",
     };
-    let d = match (s.sbx_active(), s.listen == "21") {
-        (true, false) => format!("SBX {p} on all six speakers. Films and games play each sound from its own speaker."),
-        (true, true) => format!("SBX {p} on the front speakers and subwoofer only."),
-        (false, false) if s.spreads() => "Pure 5.1: no SBX effects. The equaliser stays on.".into(),
-        (false, false) => "Pure 5.1: every channel as mixed, with no SBX effects. The equaliser stays on.".into(),
-        (false, true) => "Pure 2.1: front speakers and subwoofer only, with no SBX effects. The equaliser stays on.".into(),
+    let six = model::channels(&s.speaker_config).len() == 6;
+    let cfg = &s.speaker_config;
+    let d = match (s.sbx_active(), six) {
+        (true, true) => format!("SBX {p} on all six speakers. Films and games play each sound from its own speaker."),
+        (true, false) => format!("SBX {p} on your {cfg} speakers."),
+        (false, true) if s.spreads() => "Pure 5.1: no SBX effects. The equaliser stays on.".into(),
+        (false, true) => "Pure 5.1: every channel as mixed, with no SBX effects. The equaliser stays on.".into(),
+        (false, false) => format!("Pure {cfg}: no SBX effects. The equaliser stays on."),
     };
     format!("{d}{stereo}")
 }

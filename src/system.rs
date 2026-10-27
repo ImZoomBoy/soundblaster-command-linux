@@ -552,10 +552,7 @@ fn default_of(kind: &str) -> String {
 fn fix_defaults(s: &Settings) {
     let sink = default_of("sink");
     let hw = sink_name(s).unwrap_or_default();
-    let want = if s.listen == "21" && !s.headphones() && node_id(OUT_STEREO).is_some() {
-        // True 2.1: front left/right only; the card's bass redirection feeds the subwoofer.
-        OUT_STEREO.to_string()
-    } else if s.distance_on && !s.headphones() {
+    let want = if s.distance_on && !s.headphones() {
         OUT_MAIN.to_string()
     } else {
         hw.clone()
