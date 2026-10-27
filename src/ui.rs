@@ -459,6 +459,8 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     let vol_knob = dash::knob(&vol_adj, None, 74, "Volume: turn, scroll or use the arrow keys");
     let out_label = caps("Speakers");
     let vol_label = label("", &["big-num"]);
+    vol_label.set_width_chars(4);
+    vol_label.set_xalign(0.0);
     let mute = gtk::ToggleButton::builder().icon_name("audio-volume-high-symbolic").tooltip_text("Mute")
         .css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
     let vrow = gtk::Box::builder().spacing(6).build();
@@ -487,8 +489,10 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     stereo_row.append(&stereo_seg);
     let mode_desc = label("", &["desc"]);
     mode_desc.set_wrap(true);
+    // A fixed width: a wrapped label otherwise asks for its longest line, which
+    // changes with the profile name and shifts the whole layout.
     mode_desc.set_max_width_chars(44);
-    mode_desc.set_width_chars(30);
+    mode_desc.set_width_chars(44);
     mode_desc.set_hexpand(true);
     let out_switch = gtk::Button::builder().css_classes(["pill-btn"]).valign(gtk::Align::Center).build();
     let bottom = gtk::Box::builder().spacing(10).margin_top(10).build();
@@ -526,6 +530,7 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
         head.append(&on);
         let value = label("", &["knob-val"]);
         value.set_xalign(0.5);
+        value.set_width_chars(3);
         let col = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
         col.append(&head);
         col.append(&knob);

@@ -387,6 +387,59 @@ fn steps() -> Vec<Step> {
         }
         Ok(())
     });
+    step!("The window keeps its width: every profile, Pure, stereo option and a long title", |u: &Ui| {
+        // The right-hand column takes the width it asks for (the room gets the
+        // rest), so any card in it whose width follows its text moves the whole
+        // layout. Its top card holds the changing sentence and the volume.
+        let width = |u: &Ui| {
+            let mut col = u.mode_desc.parent();
+            while let Some(w) = col.clone() {
+                if w.width_request() == 500 {
+                    break;
+                }
+                col = w.parent();
+            }
+            let nat = |w: Option<gtk::Widget>| w.map_or(-1, |w| w.measure(gtk::Orientation::Horizontal, -1).1);
+            let right = nat(col);
+            let card = nat(u.mode_desc.parent().and_then(|p| p.parent()));
+            let win = u.win.measure(gtk::Orientation::Horizontal, -1).1;
+            if std::env::var_os("SBCOMMAND_WIDTHS").is_some() {
+                println!("WIDTH window {win} right column {right} top card {card} | {} {}", s(u).cur_profile(), s(u).stereo_on);
+            }
+            (win * 10_000 + right) * 10_000 + card
+        };
+        u.on_now_playing(Some(song()));
+        let mut seen: Vec<(String, i32)> = vec![("start".into(), width(u))];
+        for (a, _, _, _) in model::ACTIVITIES {
+            act(u, a).set_active(true);
+            for n in model::styles_for(a) {
+                chip(u, n).ok_or(format!("no {n} chip"))?.set_active(true);
+                seen.push((format!("{a}/{n}"), width(u)));
+            }
+        }
+        act(u, "music").set_active(true);
+        u.pure_btn.set_active(true);
+        seen.push(("Pure".into(), width(u)));
+        u.sbx_btn.set_active(true);
+        for id in ["front", "rear", "all"] {
+            u.stereo_btns.iter().find(|(i, _)| *i == id).unwrap().1.set_active(true);
+            seen.push((format!("stereo {id}"), width(u)));
+        }
+        u.vol_adj.set_value(9.0);
+        seen.push(("volume 9".into(), width(u)));
+        u.vol_adj.set_value(100.0);
+        seen.push(("volume 100".into(), width(u)));
+        let mut long = song();
+        long.title = "A Very Long Song Title That Goes On and On (Extended Live Remastered Version)".into();
+        long.artist = "An Artist With an Unusually Long Name and the Orchestra".into();
+        u.on_now_playing(Some(long));
+        seen.push(("long title".into(), width(u)));
+        u.on_now_playing(None);
+        chip(u, "Music").ok_or("no Music chip")?.set_active(true);
+        let w0 = seen[0].1;
+        let moved: Vec<_> = seen.iter().filter(|(_, w)| *w != w0).collect();
+        check(moved.is_empty(), format!("width {w0} changes: {moved:?}"))
+    });
     v
 }
 

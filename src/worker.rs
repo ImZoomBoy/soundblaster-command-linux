@@ -51,6 +51,7 @@ pub enum Event {
 }
 
 pub fn apply(s: &Settings, parts: u32) -> Result<(), String> {
+    crate::meters::set_bass_route(s);
     if !card::present() {
         return Err("card not available".into());
     }

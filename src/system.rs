@@ -619,10 +619,13 @@ pub fn spread_streams(mode: &str) {
     // "none", which doesn't fill the centre and rears at all.
     // "simple" copies left/right to the rears (3 dB quieter); a centre cutoff
     // above 0 also fills the centre with left+right. Measured on a null sink.
+    // The cutoff's low-pass sits at about half the value given: 12000 cut the
+    // centre by 22 dB at 10 kHz (it sounded muffled). From 48000 up the centre
+    // is flat to 14 kHz; 100000 keeps it flat for 96 and 192 kHz streams too.
     let params = match mode {
         "rear" => "{ params = [ \"channelmix.upmix\" true \"channelmix.upmix-method\" \"simple\" \"channelmix.fc-cutoff\" 0.0 \
                    \"channelmix.rear-delay\" 0.0 \"channelmix.lfe-cutoff\" 0.0 ] }",
-        "all" => "{ params = [ \"channelmix.upmix\" true \"channelmix.upmix-method\" \"simple\" \"channelmix.fc-cutoff\" 12000.0 \
+        "all" => "{ params = [ \"channelmix.upmix\" true \"channelmix.upmix-method\" \"simple\" \"channelmix.fc-cutoff\" 100000.0 \
                   \"channelmix.rear-delay\" 0.0 \"channelmix.lfe-cutoff\" 0.0 ] }",
         _ => "{ params = [ \"channelmix.upmix\" false ] }",
     }.to_string();
