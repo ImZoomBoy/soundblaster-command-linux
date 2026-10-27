@@ -32,6 +32,7 @@ card back, in one window that looks like it belongs to a sound card.
 - [Highlights](#highlights)
 - [Tour](#tour)
 - [What it fixes on Linux](#what-it-fixes-on-linux)
+- [Supported cards and systems](#supported-cards-and-systems)
 - [Install](#install)
 - [Using it](#using-it)
 - [Privacy and safety](#privacy-and-safety)
@@ -122,8 +123,25 @@ These are real problems with the ZxR on a stock Linux system, found while buildi
 | **5.1 speakers in the wrong places.** The ZxR's DSP expects Windows channel order. | Sets the 5.1 output to `FL,FR,FC,LFE,RL,RR`, so every channel reaches the right speaker. |
 | **SBX Bass does nothing on 5.1 or 2.1.** In `ca0132_effects_set` the driver forces X-Bass off whenever the speakers have a subwoofer. | Applies the Bass knob through the card's own equaliser instead (up to +8 dB below the Bass crossover), and bass redirection sends it to the subwoofer. The EQ graph shows it as a dashed line. |
 | **Spotify (Flatpak) never reaches the other speakers.** Its stream is labelled `aux0,aux1`, which PipeWire won't place. | Re-labels such streams so they play on the front speakers like any stereo source. |
-| **Settings lost after sleep or a card reset.** The driver resets the card to defaults (2.0, every effect on). | A small background service puts your settings back whenever the card comes back. Optional root helpers add a sleep fix and a password-free **Reset the sound card** button. |
+| **Centre, sub or rear right silent after a boot, sleep or reset.** The card's sound processor sometimes misses the start-up state of those outputs, and the driver never sends it again. Only a lucky restart brought them back. | Switches those outputs off and on again a couple of seconds after the card starts, so the processor picks them up (all six channels in 8 of 8 test restarts). The [driver patch](driver/README.md) does the same inside the driver. |
+| **Subwoofer crossover wrong.** The driver replaces the bass redirection crossover with the X-Bass one whenever it redoes the speaker setup, so the sub got less bass than set. | Re-sends the crossover after every change. The driver patch fixes the bug itself, and two smaller ones in the same code. |
+| **Settings lost after sleep or a card reset.** The driver resets the card to defaults (2.0, every effect on). | A small background service puts your settings back whenever the card comes back. Optional root helpers add a password-free **Reset the sound card** button. |
 | **Effects and EQ are a wall of ALSA controls.** | Creative's profiles and presets with their real values, read from the driver. |
+
+## Supported cards and systems
+
+| Sound card | Status |
+|---|---|
+| **Sound Blaster ZxR** (Sound Core3D / CA0132, PCI `1102:0012`, main codec subsystem `1102:0033`, with the DBpro daughterboard) | **Supported and tested**: every feature, 2.0 to 5.1 speakers and headphones. Developed with Cambridge SoundWorks DTT2200 5.1 speakers. |
+| Sound Blaster Z / Zx, AE-5, AE-5 Plus, AE-7, Recon3D (other PCIe CA0132 cards) | **Untested.** The app finds them and skips controls a card doesn't have, so the basics may work; ZxR-only parts (DBpro input, 600 Ω headphone gain) won't. Reports are welcome. |
+| Recon3Di motherboard audio, USB Sound Blasters (G3, G6, X3, X4 ...) | **Not supported.** |
+
+| System | Status |
+|---|---|
+| **Linux** with PipeWire, WirePlumber and pipewire-pulse, GTK 4.14+ and libadwaita 1.6+ | **Supported.** Developed and tested on CachyOS (Arch-based), Linux 7.3, KDE Plasma 6 on Wayland. Current Arch, Fedora 41+, Ubuntu 24.10+ and Debian 13+ have the right library versions but are untested. Works on GNOME too; the tray icon needs StatusNotifierItem support (the AppIndicator extension on GNOME). |
+| Linux with PulseAudio only, or Ubuntu 24.04 and older (libadwaita 1.5) | **Not supported.** The app configures PipeWire and WirePlumber. |
+| Windows, macOS | **No.** On Windows, use Creative's own Sound Blaster Command. |
+| **Optional driver patch** ([`driver/`](driver/README.md)) | Linux **6.17 or newer** (the driver moved to `sound/hda/codecs/` in 6.17), tested on 7.3. Needs your kernel's headers. The module is unsigned, so it won't load where Secure Boot enforces module signatures. You don't need it: the app works around the same problems on the stock driver. |
 
 ## Install
 
@@ -133,7 +151,7 @@ These are real problems with the ZxR on a stock Linux system, found while buildi
 - **GTK 4.14+** and **libadwaita 1.6+**
 - **Rust** (edition 2024, so 1.85 or newer) to build
 - systemd (user services, `busctl`), `curl`; optional: `notify-send`, a StatusNotifierItem tray (KDE Plasma, or the AppIndicator extension on GNOME)
-- A **Creative Sound Blaster ZxR** (CA0132, PCI `1102:0012`). Other CA0132 cards may partly work but are untested.
+- A **Creative Sound Blaster ZxR**; see [Supported cards and systems](#supported-cards-and-systems)
 
 On Arch / CachyOS:
 
@@ -153,13 +171,21 @@ This builds the app, installs it to `~/.local/bin/sbcommand` with a menu entry a
 `sbcommand-watch` user service, which keeps your settings on the card and runs the tray icon.
 The first run writes small PipeWire/WirePlumber config files, so sound may stop for a second once while they load.
 
-Optional, with sudo: the sleep fix and the password-free **Reset** button.
+Optional, with sudo: the password-free **Reset the sound card** button (and a sleep hook that is off by default).
 
 ```sh
 sudo packaging/root/install-root-helpers.sh
 ```
 
+If sound or video stalls after waking from sleep, also run `sudo bash packaging/root/boot-and-sleep-fix.sh`
+and restart. It adds `iommu=pt` to the kernel command line, which stopped the card's IOMMU errors after sleep.
+It does this automatically on Limine (CachyOS's default boot loader) and prints the steps for GRUB and
+systemd-boot.
+
 To remove it: `./install.sh --uninstall` (your settings in `~/.config/sbcommand` are kept).
+
+Optional, the [driver patch](driver/README.md): `sh driver/build.sh` (downloads and builds the matching driver
+source, no sudo), then `sudo sh driver/install.sh`. Sound stops for a few seconds while the card reloads.
 
 ## Using it
 
@@ -227,6 +253,21 @@ SBCOMMAND_DRYRUN=1 SBCOMMAND_CONFIG_DIR=/tmp/sbc SBCOMMAND_DEMO_MEDIA=music \
 SBCOMMAND_DEMO_ART=assets/demo/music.png SBCOMMAND_SHOT_SIZE=1280x820 \
 SBCOMMAND_SHOT=shot.png ./target/release/sbcommand
 ```
+
+Helper scripts in `dev/`:
+
+| Script | Does |
+|---|---|
+| `dev/isolated-kwin.sh "<cmd>"` | Runs a GUI command in a private virtual KWin, apart from your desktop (use it for `selftest`) |
+| `dev/screenshots.sh` | Retakes every screenshot in `docs/screenshots` |
+| `dev/where-is-each-channel.sh` | Silent check that each of the six channels lands where it should in PipeWire |
+| `sudo sh dev/pin-sense.sh` | Read-only: which output sockets the card detects a plug in, and how each output is set up |
+| `sudo sh dev/zxr-gpio.sh`, `sudo sh dev/hard-reset.sh` | Investigation only: set the card's control pins, or reset it over the PCI bus |
+
+[`capture/`](capture/README.md) holds the tools that found the silent-channel bug:
+- `capture/dsp-probe.sh` records each output of the card's sound processor and shows which channel reaches it,
+  without listening. It needs the test driver (`sh driver/build.sh --dev`).
+- The scripts that captured Creative's Windows driver starting the card, in a virtual machine.
 
 The demo tracks, film and game (*Neon Rain*, *Starfall*, *Night Circuit*) and their artwork are made up for these screenshots.
 
