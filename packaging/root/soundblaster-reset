@@ -1,9 +1,15 @@
 #!/bin/sh
-# Switches the Creative Sound Blaster (PCI 1102:0012, CA0132) off and on again:
-#   pre  - before sleep (unbind from snd_hda_intel)
-#   post - after waking (bind again)
-#   now  - reset immediately (used by the app's "Reset the sound card")
+# Restarts the Creative Sound Blaster's driver (PCI 1102:0012, CA0132):
+#   now  - unbind and bind the driver (the app's "Reset the sound card")
+#   pre  - before sleep: unbind, only if SLEEP_RESET=yes
+#   post - after waking: bind again, only if SLEEP_RESET=yes
+# Sleep leaves the card running by default: the restart only worked around a
+# video/audio stall after waking, which iommu=pt on the kernel command line
+# prevents (packaging/root/boot-and-sleep-fix.sh). Set SLEEP_RESET=yes in
+# /etc/default/soundblaster-reset to restart the card around sleep again.
 DRV=/sys/bus/pci/drivers/snd_hda_intel
+SLEEP_RESET=no
+[ -r /etc/default/soundblaster-reset ] && . /etc/default/soundblaster-reset
 DEV=""
 for d in /sys/bus/pci/devices/*; do
   if [ "$(cat "$d/vendor" 2>/dev/null)" = 0x1102 ] && [ "$(cat "$d/device" 2>/dev/null)" = 0x0012 ]; then
@@ -12,9 +18,18 @@ for d in /sys/bus/pci/devices/*; do
 done
 [ -n "$DEV" ] || exit 0
 case "$1" in
-  pre)  if [ -e "$DRV/$DEV" ]; then echo "$DEV" > "$DRV/unbind"; logger -t soundblaster-reset "switched off $DEV before sleep"; fi ;;
-  post) if [ ! -e "$DRV/$DEV" ]; then echo "$DEV" > "$DRV/bind"; logger -t soundblaster-reset "switched on $DEV after waking"; fi ;;
-  now)  if [ -e "$DRV/$DEV" ]; then echo "$DEV" > "$DRV/unbind"; sleep 1; fi
-        echo "$DEV" > "$DRV/bind"; logger -t soundblaster-reset "reset $DEV" ;;
+  pre)
+    if [ "$SLEEP_RESET" = yes ]; then
+      if [ -e "$DRV/$DEV" ]; then echo "$DEV" > "$DRV/unbind"; logger -t soundblaster-reset "switched off $DEV before sleep"; fi
+    else
+      logger -t soundblaster-reset "sleep: leaving $DEV running (SLEEP_RESET=no)"
+    fi ;;
+  post)
+    # Always make sure the driver is bound after waking, even if it was
+    # unbound by an older version of this script.
+    if [ ! -e "$DRV/$DEV" ]; then echo "$DEV" > "$DRV/bind"; logger -t soundblaster-reset "switched on $DEV after waking"; fi ;;
+  now)
+    if [ -e "$DRV/$DEV" ]; then echo "$DEV" > "$DRV/unbind"; sleep 1; fi
+    echo "$DEV" > "$DRV/bind"; logger -t soundblaster-reset "reset $DEV" ;;
 esac
 exit 0

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Optional, needs sudo. Installs two system helpers for the Sound Blaster ZxR:
-#  1. soundblaster-sleep.service: switches the card off before sleep and on
-#     after waking (fixes video/audio freezing after resume on some systems).
+#  1. soundblaster-sleep.service: optionally restarts the card around sleep
+#     (off by default; see /etc/default/soundblaster-reset).
 #  2. soundblaster-reset-now.service + a polkit rule, so the app's
 #     "Reset the sound card" button works without a password for this user.
 set -euo pipefail
