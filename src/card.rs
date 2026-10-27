@@ -89,6 +89,22 @@ pub fn set(pairs: &[(&str, V)]) -> Result<(), String> {
     if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
 }
 
+/// Switches the centre, sub and rear outputs off and on again, once the card
+/// has started.
+///
+/// The Sound Blaster's sound processor sometimes misses the start-up writes of
+/// these switches and then keeps some of those channels silent, in any mix of
+/// centre, sub and rear right (found by recording the processor's outputs,
+/// capture/dsp-probe.sh). It only reacts to a change, and the driver skips
+/// writes of an unchanged value, so this makes a real off-on change.
+pub fn wake_surround() -> Result<(), String> {
+    const SWITCHES: [&str; 3] = ["Center Playback Switch", "LFE Playback Switch", "Surround Playback Switch"];
+    let pairs = |on: bool| SWITCHES.iter().map(|n| (*n, V::B(on))).collect::<Vec<_>>();
+    set(&pairs(false))?;
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    set(&pairs(true))
+}
+
 /// Keeps the card's own volume sliders at or below 0 dB, with per-speaker trims.
 /// PipeWire handles the actual volume, so the card never adds digital boost.
 pub fn set_volumes(s: &Settings) -> Result<(), String> {

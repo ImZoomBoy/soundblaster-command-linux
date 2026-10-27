@@ -645,8 +645,20 @@ pub fn speaker_pairs(s: &Settings) -> Pairs {
         ("Full-Range Front Speakers", V::B(s.full_range_front)),
         ("Full-Range Rear Speakers", V::B(s.full_range_rear)),
         ("Bass Redirection", V::B(s.bass_redirect && s.has_sub())),
-        ("Bass Redirection Crossover", V::I((s.crossover / 10).clamp(1, 100))),
         ("ZxR: 600 Ohm Gain", V::B(s.hp_600ohm)),
+    ]
+}
+
+/// The bass redirection crossover, written last in every batch that can reset
+/// it. The stock driver reloads the X-Bass crossover into the card whenever it
+/// redoes the output setup (speaker setup, Output Select, the effects master
+/// switch), and it ignores a write of the value the control already holds.
+/// Writing a neighbouring value first makes it send ours.
+pub fn crossover_pairs(s: &Settings) -> Pairs {
+    let xover = (s.crossover / 10).clamp(1, 100);
+    vec![
+        ("Bass Redirection Crossover", V::I(if xover > 1 { xover - 1 } else { 2 })),
+        ("Bass Redirection Crossover", V::I(xover)),
     ]
 }
 
@@ -1009,6 +1021,16 @@ mod tests {
         let p = speaker_pairs(&s);
         assert!(p.contains(&("Bass Redirection", V::B(false))));
         assert!(p.contains(&("Surround Channel Config", V::E(2))));
+    }
+
+    #[test]
+    fn crossover_is_resent_with_a_different_value_first() {
+        let mut s = Settings::default();
+        s.crossover = 140;
+        assert_eq!(crossover_pairs(&s), vec![("Bass Redirection Crossover", V::I(13)), ("Bass Redirection Crossover", V::I(14))]);
+        s.crossover = 10;
+        assert_eq!(crossover_pairs(&s).last().unwrap().1, V::I(1));
+        assert_ne!(crossover_pairs(&s)[0].1, V::I(1));
     }
 
     #[test]

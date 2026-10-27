@@ -71,6 +71,10 @@ pub fn apply(s: &Settings, parts: u32) -> Result<(), String> {
     if parts & part::REC != 0 {
         pairs.extend(model::rec_pairs(s));
     }
+    if parts & (part::SPEAKER | part::FX | part::REFRESH) != 0 {
+        // Last: the writes above can make the driver reset the crossover.
+        pairs.extend(model::crossover_pairs(s));
+    }
     let mut result = card::set(&pairs);
     if parts & part::VOLUMES != 0
         && let Err(e) = card::set_volumes(s) {
@@ -269,6 +273,9 @@ pub fn watch() -> ! {
                 apply_configs(&s);
             } else {
                 let _ = apply(&s, part::ALL);
+            }
+            if let Err(e) = card::wake_surround() {
+                eprintln!("sbcommand: could not wake the surround outputs: {e}");
             }
             eprintln!("sbcommand: settings applied ({})", if last.is_none() { "start" } else { "card reset" });
             last = card::signature();

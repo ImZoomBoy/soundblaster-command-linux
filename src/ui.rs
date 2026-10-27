@@ -695,7 +695,7 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     let rr = adw::ActionRow::builder().title("Fix fuzzy sound").subtitle("Sends every setting to the card again (Ctrl+R)").build();
     rr.add_suffix(&refresh_btn);
     let reset_btn = gtk::Button::builder().label("Reset").valign(gtk::Align::Center).css_classes(["destructive-action"]).build();
-    let rs = adw::ActionRow::builder().title("Reset the sound card").subtitle("Restarts the card without restarting the PC").build();
+    let rs = adw::ActionRow::builder().title("Reset the sound card").subtitle("Restarts the card without restarting the PC: for fuzzy sound, a silent speaker or a card that stopped").build();
     rs.add_suffix(&reset_btn);
     let defaults_btn = button("Restore");
     let dfr = adw::ActionRow::builder().title("Restore defaults").subtitle("Every setting, your own profiles and presets").build();
