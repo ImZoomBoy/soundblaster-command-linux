@@ -1,6 +1,4 @@
 /target
-/prototype/
-assets/icon-old-red.svg
 /driver/build/
 /capture/build/
 __pycache__/

@@ -10,7 +10,7 @@ set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"; B="$HERE/build"; NAME="${1:-probe}"
 P="$B/probe"; mkdir -p "$P"
 s() { systemctl start "sbcap-cmd@$(systemd-escape "$1")"; }
-[ -f "$B/tests/tones6.wav" ] || python3 -I "$HERE/dsp-probe.py" make "$B/tests/tones6.wav"
+mkdir -p "$B/tests"; [ -f "$B/tests/tones6.wav" ] || python3 -I "$HERE/dsp-probe.py" make "$B/tests/tones6.wav"
 pw-play --channels 6 --channel-map FL,FR,FC,LFE,RL,RR --properties '{ node.name = "sbcommand.test" media.role = "Test" }' \
         --target alsa_output.pci-0000_67_00.0.analog-surround-51 "$B/tests/tones6.wav" & PLAY=$!
 sleep 1

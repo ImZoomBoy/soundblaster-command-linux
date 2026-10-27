@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
-<defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#05060f"/><stop offset="1" stop-color="#1b0b3a"/></linearGradient></defs>
-<rect width="600" height="600" fill="url(#b)"/>
-<g stroke="#2bd9c8" stroke-opacity=".55" stroke-width="2">
-<path d="M0 400 H600 M0 440 H600 M0 490 H600 M0 550 H600"/><path d="M300 360 L-200 600 M300 360 L0 600 M300 360 L150 600 M300 360 L300 600 M300 360 L450 600 M300 360 L600 600 M300 360 L800 600"/></g>
-<circle cx="300" cy="330" r="110" fill="#ff416c" opacity=".9"/><rect x="180" y="300" width="240" height="8" fill="#05060f"/><rect x="180" y="330" width="240" height="10" fill="#05060f"/><rect x="180" y="362" width="240" height="12" fill="#05060f"/>
-<text x="300" y="150" text-anchor="middle" font-family="sans-serif" font-size="58" font-weight="900" fill="#fcee0a" letter-spacing="4">NIGHT CIRCUIT</text></svg>

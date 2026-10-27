@@ -36,7 +36,8 @@ Output lands in `capture/build/` (not committed).
 2. Build the patched QEMU (no root). It installs to `/var/tmp/sbcap-qemu`, where libvirt's QEMU user can run it:
 
    ```sh
-   cd capture/build && tar -xJf qemu-11.1.2.tar.xz && cd qemu-11.1.2
+   mkdir -p capture/build && cd capture/build && curl -LO https://download.qemu.org/qemu-11.1.2.tar.xz
+   tar -xJf qemu-11.1.2.tar.xz && cd qemu-11.1.2
    patch -p0 hw/vfio/region.c < ../../qemu-sbcap-trace.patch
    python3 -m venv ../venv && ../venv/bin/pip install ninja && PATH=$PWD/../venv/bin:$PATH \
    ./configure --target-list=x86_64-softmmu --prefix=/var/tmp/sbcap-qemu --enable-kvm --enable-spice \
@@ -47,8 +48,10 @@ Output lands in `capture/build/` (not committed).
 3. Optional, before the VM capture: `sudo sh capture/linux-trace.sh` records the Linux driver restarting the card
    (kernel hda tracepoints).
 4. `capture/vm-capture-start.sh`: shuts the runner down, starts the VM with the card and logging.
-5. `capture/vm-guest.py install-driver`: copies the Microsoft-signed Creative driver (Update Catalog,
-   "CREATIVE - MEDIA - 6.0.102.75", `ctHda.inf`) into Windows and installs it. Further commands run with
+5. `capture/vm-guest.py install-driver`: copies the Microsoft-signed Creative driver into Windows and installs
+   it. Download it from the Microsoft Update Catalog ("CREATIVE - MEDIA - 6.0.102.75") and extract the `.cab`
+   to `capture/build/driver/x/` (`cabextract -d capture/build/driver/x FILE.cab`), or pass another folder that
+   holds `ctHda.inf`. Further commands run with
    `vm-guest.py run "<PowerShell>"`.
 6. `capture/vm-capture-stop.sh`: shuts the VM down, which also logs the driver's shutdown, restores the VM's
    original settings and starts the runner again.

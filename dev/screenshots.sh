@@ -18,14 +18,13 @@ ROCK='"eqs":{"music":"Rock"},"eq":{"speakers":"Rock","headphones":"Rock"}'
 shot music "" music music "{\"activity\":\"music\",\$ROCK,\"listen\":\"51\"}" music
 shot movie "" movie film '{"activity":"movie","styles":{"movie":"Cinema"},"listen":"51"}' film
 shot game "" game game '{"activity":"game","styles":{"game":"FPS"},"game_footsteps":true,"listen":"51"}'
-shot pure "" music music "{\"activity\":\"music\",\"sbx_enabled\":false,\"listen\":\"51\",\$ROCK}" pure
+shot pure "" music music "{\"activity\":\"music\",\"sbx_enabled\":false,\"listen\":\"51\",\$ROCK}"
 shot rears "" music music "{\"activity\":\"music\",\"listen\":\"51\",\"stereo_on\":\"rear\",\$ROCK}" rears
 shot two-one "" music music "{\"activity\":\"music\",\"listen\":\"21\",\$ROCK}"
 shot mixer mixer movie film '{"activity":"movie","boost_db":3,"listen":"51"}'
 shot crystalvoice crystalvoice "" music '{"activity":"music","rec":{"voice_clarity":true,"noise_reduction":true,"smart_volume":true,"svm_level":60,"focus":true,"focus_angle":90}}'
 shot setup setup "" music '{"activity":"music","speaker_type":"dtt2200","crossover":140}'
 shot settings settings "" music '{"activity":"music"}'
-shot idle "" "" music '{"activity":"music"}'
 EOS
 chmod +x /tmp/sbshots-run.sh
 timeout 500 dev/isolated-kwin.sh /tmp/sbshots-run.sh >/dev/null 2>&1 || true

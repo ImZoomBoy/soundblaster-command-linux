@@ -257,7 +257,6 @@ Helper scripts in `dev/`:
 | `dev/screenshots.sh` | Retakes every screenshot in `docs/screenshots` |
 | `dev/where-is-each-channel.sh` | Silent check that each of the six channels lands where it should in PipeWire |
 | `sudo sh dev/pin-sense.sh` | Read-only: which output sockets the card detects a plug in, and how each output is set up |
-| `sudo sh dev/zxr-gpio.sh`, `sudo sh dev/hard-reset.sh` | Investigation only: set the card's control pins, or reset it over the PCI bus |
 
 [`capture/`](capture/README.md) holds the tools that found the silent-channel bug:
 - `capture/dsp-probe.sh` records each output of the card's sound processor and shows which channel reaches it,
