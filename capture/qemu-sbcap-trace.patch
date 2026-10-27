@@ -1,0 +1,265 @@
+--- hw/vfio/region.c.orig	2026-10-26 22:07:34.911121724 +0000
++++ hw/vfio/region.c	2026-10-26 23:14:13.193209227 +0000
+@@ -33,6 +33,246 @@
+ #include "vfio-helpers.h"
+ 
+ /*
++ * Sound Blaster capture (local patch): when SBCAP_TRACE_FILE is set, log
++ * every BAR access of the device named in SBCAP_DEVICE (e.g. 0000:67:00.0),
++ * plus the HDA codec commands the guest puts in the CORB ring and the
++ * responses the card writes to the RIRB ring (both live in guest RAM, so a
++ * plain vfio_region_* trace can't see them). One line per event:
++ *   W <usec> <bar> <off> <size> <data>     BAR write
++ *   R <usec> <bar> <off> <size> <data> [xN] BAR read (repeats collapsed)
++ *   V <usec> <idx> <verb>                   CORB entry (codec command)
++ *   A <usec> <idx> <resp> <resp_ex>         RIRB entry (codec response)
++ */
++#include "system/address-spaces.h"
++#include "system/memory.h"
++
++static struct {
++    int init;
++    FILE *f;
++    const char *dev;
++    uint64_t corb_base, rirb_base;
++    unsigned corb_wp, rirb_wp, corb_n, rirb_n;
++    int corb_run;
++    /* collapsed repeated reads */
++    int last_bar; hwaddr last_off; unsigned last_size; uint64_t last_data;
++    unsigned long repeat;
++    /* DMA stream descriptors (0x80 + n*0x20): BDL, last valid index, format */
++    struct { uint64_t bdl; unsigned lvi, cbl, fmt; int run; } sd[16];
++    unsigned dumps;
++    uint64_t dumped_bytes;
++} sbcap;
++
++/*
++ * When the guest starts a DMA stream (SDnCTL RUN 0->1), save every buffer in
++ * its BDL to SBCAP_DMA_DIR/dma-<seq>-sd<n>-fmt<fmt>.bin and log a D line:
++ *   D <usec> <seq> <sd> <fmt> <cbl> <entries> <bytes> <file>
++ */
++static void sbcap_dump_stream(FILE *f, unsigned n)
++{
++    const char *dir = getenv("SBCAP_DMA_DIR");
++    char path[512];
++    FILE *out;
++    unsigned i, bytes = 0;
++    uint8_t *buf;
++
++    if (!dir || !sbcap.sd[n].bdl || sbcap.dumped_bytes > (256u << 20)) {
++        return;
++    }
++    snprintf(path, sizeof(path), "%s/dma-%04u-sd%u-fmt%04x.bin", dir, sbcap.dumps, n, sbcap.sd[n].fmt);
++    out = fopen(path, "wb");
++    if (!out) {
++        return;
++    }
++    buf = g_malloc(1 << 20);
++    for (i = 0; i <= sbcap.sd[n].lvi && i < 256; i++) {
++        uint32_t e[4];
++        uint64_t addr;
++        unsigned len;
++        address_space_read(&address_space_memory, sbcap.sd[n].bdl + i * 16,
++                           MEMTXATTRS_UNSPECIFIED, e, sizeof(e));
++        addr = le32_to_cpu(e[0]) | ((uint64_t)le32_to_cpu(e[1]) << 32);
++        len = le32_to_cpu(e[2]);
++        if (len > (1 << 20)) {
++            len = 1 << 20;
++        }
++        address_space_read(&address_space_memory, addr, MEMTXATTRS_UNSPECIFIED, buf, len);
++        fwrite(buf, 1, len, out);
++        bytes += len;
++    }
++    g_free(buf);
++    fclose(out);
++    sbcap.dumped_bytes += bytes;
++    fprintf(f, "D %" PRId64 " %u %u %04x %u %u %u %s\n", g_get_monotonic_time(), sbcap.dumps,
++            n, sbcap.sd[n].fmt, sbcap.sd[n].cbl, sbcap.sd[n].lvi + 1, bytes, path);
++    sbcap.dumps++;
++}
++
++static FILE *sbcap_file(VFIODevice *vbasedev)
++{
++    if (!sbcap.init) {
++        const char *path = getenv("SBCAP_TRACE_FILE");
++        sbcap.init = 1;
++        sbcap.dev = getenv("SBCAP_DEVICE");
++        sbcap.corb_n = 256;
++        sbcap.rirb_n = 256;
++        sbcap.last_bar = -1;
++        if (path && sbcap.dev) {
++            sbcap.f = fopen(path, "a");
++            if (sbcap.f) {
++                setvbuf(sbcap.f, NULL, _IOFBF, 1 << 20);
++                fprintf(sbcap.f, "# sbcap start device %s\n", sbcap.dev);
++            }
++        }
++    }
++    if (!sbcap.f || !vbasedev->name || strcmp(vbasedev->name, sbcap.dev)) {
++        return NULL;
++    }
++    return sbcap.f;
++}
++
++static void sbcap_flush_repeat(FILE *f)
++{
++    if (sbcap.repeat > 1) {
++        fprintf(f, "# x%lu\n", sbcap.repeat);
++    }
++    sbcap.repeat = 0;
++    sbcap.last_bar = -1;
++}
++
++static unsigned sbcap_ring_entries(uint64_t size_reg)
++{
++    switch (size_reg & 3) {
++    case 0: return 2;
++    case 1: return 16;
++    default: return 256;
++    }
++}
++
++static void sbcap_rirb_catch_up(FILE *f, unsigned new_wp)
++{
++    new_wp &= 0xff;
++    while (sbcap.rirb_base && sbcap.rirb_wp != new_wp) {
++        uint32_t e[2] = { 0, 0 };
++        sbcap.rirb_wp = (sbcap.rirb_wp + 1) % sbcap.rirb_n;
++        address_space_read(&address_space_memory, sbcap.rirb_base + sbcap.rirb_wp * 8,
++                           MEMTXATTRS_UNSPECIFIED, e, sizeof(e));
++        fprintf(f, "A %" PRId64 " %u %08x %08x\n", g_get_monotonic_time(),
++                sbcap.rirb_wp, le32_to_cpu(e[0]), le32_to_cpu(e[1]));
++    }
++}
++
++static void sbcap_write(VFIODevice *vbasedev, int bar, hwaddr off, uint64_t data, unsigned size)
++{
++    FILE *f = sbcap_file(vbasedev);
++    hwaddr a;
++
++    if (!f) {
++        return;
++    }
++    sbcap_flush_repeat(f);
++    fprintf(f, "W %" PRId64 " %d %05" PRIx64 " %u %" PRIx64 "\n",
++            g_get_monotonic_time(), bar, (uint64_t)off, size, data);
++    if (bar != 0) {
++        return;
++    }
++    /* Track ring registers, whatever access size the guest uses. */
++    for (a = off; a < off + size; a++) {
++        unsigned shift = (a - off) * 8;
++        uint64_t byte = (data >> shift) & 0xff;
++        switch (a) {
++        case 0x40: case 0x41: case 0x42: case 0x43:
++            sbcap.corb_base = deposit64(sbcap.corb_base, (a - 0x40) * 8, 8, byte); break;
++        case 0x44: case 0x45: case 0x46: case 0x47:
++            sbcap.corb_base = deposit64(sbcap.corb_base, 32 + (a - 0x44) * 8, 8, byte); break;
++        case 0x4a: /* CORBRP: bit 15 = reset */
++            break;
++        case 0x4e:
++            sbcap.corb_n = sbcap_ring_entries(byte); break;
++        case 0x50: case 0x51: case 0x52: case 0x53:
++            sbcap.rirb_base = deposit64(sbcap.rirb_base, (a - 0x50) * 8, 8, byte); break;
++        case 0x54: case 0x55: case 0x56: case 0x57:
++            sbcap.rirb_base = deposit64(sbcap.rirb_base, 32 + (a - 0x54) * 8, 8, byte); break;
++        case 0x59: /* RIRBWP bit 15 = reset the write pointer */
++            if (byte & 0x80) {
++                sbcap.rirb_wp = 0;
++            }
++            break;
++        case 0x4c: /* CORBCTL bit 1 = CORB DMA running */
++            sbcap.corb_run = !!(byte & 0x02);
++            break;
++        case 0x5e:
++            sbcap.rirb_n = sbcap_ring_entries(byte); break;
++        }
++        if (a >= 0x80 && a < 0x80 + 16 * 0x20) {
++            unsigned n = (a - 0x80) / 0x20, o = (a - 0x80) % 0x20;
++            switch (o) {
++            case 0x00: {                       /* SDnCTL byte 0: bit 1 = RUN */
++                int run = !!(byte & 0x02);
++                if (run && !sbcap.sd[n].run) {
++                    sbcap_dump_stream(f, n);
++                }
++                sbcap.sd[n].run = run;
++                break;
++            }
++            case 0x08: case 0x09: case 0x0a: case 0x0b:
++                sbcap.sd[n].cbl = deposit32(sbcap.sd[n].cbl, (o - 0x08) * 8, 8, byte); break;
++            case 0x0c: case 0x0d:
++                sbcap.sd[n].lvi = deposit32(sbcap.sd[n].lvi, (o - 0x0c) * 8, 8, byte) & 0xff; break;
++            case 0x12: case 0x13:
++                sbcap.sd[n].fmt = deposit32(sbcap.sd[n].fmt, (o - 0x12) * 8, 8, byte); break;
++            case 0x18: case 0x19: case 0x1a: case 0x1b:
++                sbcap.sd[n].bdl = deposit64(sbcap.sd[n].bdl, (o - 0x18) * 8, 8, byte); break;
++            case 0x1c: case 0x1d: case 0x1e: case 0x1f:
++                sbcap.sd[n].bdl = deposit64(sbcap.sd[n].bdl, 32 + (o - 0x1c) * 8, 8, byte); break;
++            }
++        }
++    }
++    /* A CORBWP write (0x48) hands new commands to the card: log them. */
++    if (off <= 0x48 && off + size > 0x48 && sbcap.corb_base) {
++        unsigned wp = ((data >> ((0x48 - off) * 8)) & 0xff) % sbcap.corb_n;
++        if (!sbcap.corb_run) {
++            /* Ring being set up or reset: just follow the pointer. */
++            sbcap.corb_wp = wp;
++        }
++        while (sbcap.corb_wp != wp) {
++            uint32_t verb = 0;
++            sbcap.corb_wp = (sbcap.corb_wp + 1) % sbcap.corb_n;
++            address_space_read(&address_space_memory, sbcap.corb_base + sbcap.corb_wp * 4,
++                               MEMTXATTRS_UNSPECIFIED, &verb, sizeof(verb));
++            fprintf(f, "V %" PRId64 " %u %08x\n", g_get_monotonic_time(),
++                    sbcap.corb_wp, le32_to_cpu(verb));
++        }
++    }
++}
++
++static void sbcap_read(VFIODevice *vbasedev, int bar, hwaddr off, uint64_t data, unsigned size)
++{
++    FILE *f = sbcap_file(vbasedev);
++
++    if (!f) {
++        return;
++    }
++    if (bar == 0 && off <= 0x58 && off + size > 0x58) {
++        /* The guest reads RIRBWP: log the responses the card wrote since. */
++        sbcap_flush_repeat(f);
++        sbcap_rirb_catch_up(f, (data >> ((0x58 - off) * 8)) & 0xff);
++    }
++    if (bar == sbcap.last_bar && off == sbcap.last_off && size == sbcap.last_size &&
++        data == sbcap.last_data) {
++        sbcap.repeat++;
++        return;
++    }
++    sbcap_flush_repeat(f);
++    fprintf(f, "R %" PRId64 " %d %05" PRIx64 " %u %" PRIx64 "\n",
++            g_get_monotonic_time(), bar, (uint64_t)off, size, data);
++    sbcap.last_bar = bar;
++    sbcap.last_off = off;
++    sbcap.last_size = size;
++    sbcap.last_data = data;
++    sbcap.repeat = 1;
++}
++
++/*
+  * IO Port/MMIO - Beware of the endians, VFIO is always little endian
+  */
+ void vfio_region_write(void *opaque, hwaddr addr,
+@@ -76,6 +316,7 @@
+     }
+ 
+     trace_vfio_region_write(vbasedev->name, region->nr, addr, data, size);
++    sbcap_write(vbasedev, region->nr, addr, data, size);
+ 
+     /*
+      * A read or write to a BAR always signals an INTx EOI.  This will
+@@ -128,6 +369,7 @@
+     }
+ 
+     trace_vfio_region_read(vbasedev->name, region->nr, addr, size, data);
++    sbcap_read(vbasedev, region->nr, addr, data, size);
+ 
+     /* Same as write above */
+     vbasedev->ops->vfio_eoi(vbasedev);
