@@ -429,7 +429,7 @@ pub fn outputs_conf(s: &Settings) -> String {
     }} }}"#);
     }
     let relabel_target = if s.distance_on && !s.headphones() { OUT_MAIN.to_string() } else { target.clone() };
-    // Spreading is set live per stream (spread_streams); keep this text as it
+    // Spreading is set live per stream (apply_streams); keep this text as it
     // was so the outputs process isn't restarted.
     let spread = false;
     mods += &format!(r#"
@@ -550,7 +550,7 @@ pub fn apply_outputs(s: &Settings) {
     fix_defaults(s);
     // Restarted outputs come back with default settings; re-apply ours.
     relabel_aux_streams();
-    spread_streams(s.spread_mode());
+    apply_streams(s);
 }
 
 fn default_of(kind: &str) -> String {
@@ -614,38 +614,78 @@ pub fn set_mute(mute: bool) {
 }
 
 /// Calls `changed` whenever any output's volume or the default output changes.
-/// Switches stereo spreading on or off for every stream that's playing, live
-/// (PipeWire's per-stream "channelmix.upmix"), so the listening mode changes
-/// without restarting anything. Our own outputs are left alone.
-pub fn spread_streams(mode: &str) {
+/// Each playing stream's sound, set live (nothing restarts):
+/// - where stereo plays (PipeWire's per-stream "channelmix.upmix");
+/// - for an app of another kind than the one setting the card (music beside
+///   a game), its own kind's "Stereo plays on" and an EQ inside its stream
+///   (PipeWire's per-stream filter graph) that turns the card's EQ into its
+///   own kind's (`model::stream_sound`). The card holds one EQ and one set of
+///   SBX effects; the SBX effects stay the card's.
+/// Our own outputs are left alone, except the relabelled stereo (Spotify's).
+pub fn apply_streams(s: &Settings) {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<HashMap<u64, String>>> = Mutex::new(None);
     if card::dry_run() {
-        eprintln!("dry-run: stereo on {mode}");
+        eprintln!("dry-run: streams for {} (stereo on {})", if s.kind.is_empty() { "-" } else { &s.kind }, s.spread_mode());
         return;
     }
     let Some(out) = run("pw-dump", &["Node"]) else { return };
     let Ok(v) = serde_json::from_str::<Value>(&out) else { return };
-    // Set the method too: apps that don't read the desktop's audio settings
-    // (Flatpaks like Spotify, and our own outputs) otherwise default to
-    // "none", which doesn't fill the centre and rears at all.
-    // "simple" copies left/right to the rears (3 dB quieter); fc-cutoff 0
-    // keeps the centre silent. Measured on a null sink. (A centre filled with
-    // left + right, the old "All", sounded hollow on most recordings.)
-    let params = match mode {
-        "rear" => "{ params = [ \"channelmix.upmix\" true \"channelmix.upmix-method\" \"simple\" \"channelmix.fc-cutoff\" 0.0 \
-                   \"channelmix.rear-delay\" 0.0 \"channelmix.lfe-cutoff\" 0.0 ] }",
-        _ => "{ params = [ \"channelmix.upmix\" false ] }",
-    }.to_string();
+    // What each app is (by PipeWire's object.serial), when several play.
+    let kinds: HashMap<u64, &'static str> = if s.per_app && !s.kind.is_empty() {
+        crate::detect::detect_each().iter().map(|(i, d)| (*i, crate::meta::kind_of_detection(d))).collect()
+    } else {
+        HashMap::new()
+    };
+    let mut done: HashMap<u64, String> = HashMap::new();
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
     for n in v.as_array().into_iter().flatten() {
         let p = &n["info"]["props"];
         let name = p["node.name"].as_str().unwrap_or("");
-        // Our own outputs stay as they are, except the relabelled stereo.
         if p["media.class"] != "Stream/Output/Audio" || (name.starts_with("sbcommand") && name != "sbcommand.relabel.out") {
             continue;
         }
-        if let Some(id) = n["id"].as_u64() {
+        let Some(id) = n["id"].as_u64() else { continue };
+        let serial = p["object.serial"].as_u64().or_else(|| p["object.serial"].as_str().and_then(|x| x.parse().ok()));
+        // The relabelled stereo carries Spotify (music).
+        let kind = if name == "sbcommand.relabel.out" { Some("music") } else { serial.and_then(|x| kinds.get(&x).copied()) };
+        let (eq, mode) = match kind.filter(|k| s.per_app && !s.kind.is_empty() && *k != s.kind) {
+            Some(k) => crate::model::stream_sound(s, k),
+            None => (vec![0; 10], s.spread_mode().to_string()),
+        };
+        // (the relabelled stereo is spread its way; its EQ is on Spotify's own stream)
+        let eq = if name == "sbcommand.relabel.out" { vec![0; 10] } else { eq };
+        // "simple" copies left/right to the rears (3 dB quieter); fc-cutoff 0
+        // keeps the centre silent. Measured on a null sink. Set the method too:
+        // apps that don't read the desktop's audio settings (Flatpaks like
+        // Spotify, and our own outputs) otherwise default to "none".
+        let mix = match mode.as_str() {
+            "rear" => "\"channelmix.upmix\" true \"channelmix.upmix-method\" \"simple\" \"channelmix.fc-cutoff\" 0.0 \
+                       \"channelmix.rear-delay\" 0.0 \"channelmix.lfe-cutoff\" 0.0",
+            _ => "\"channelmix.upmix\" false",
+        };
+        let graph = eq_graph(&eq).map_or("null".to_string(), |g| format!("\"{}\"", g.replace('"', "\\\"")));
+        let params = format!("{{ params = [ {mix} \"audioconvert.filter-graph.0\" {graph} ] }}");
+        if last.as_ref().and_then(|l| l.get(&id)) != Some(&params) {
             run("pw-cli", &["set-param", &id.to_string(), "Props", &params]);
         }
+        done.insert(id, params);
     }
+    *last = Some(done);
+}
+
+/// A 10-band EQ as a PipeWire filter graph (peaking filters an octave wide at
+/// the card's own bands), or None when every band is 0 dB.
+fn eq_graph(gains: &[i32]) -> Option<String> {
+    if gains.iter().all(|g| *g == 0) {
+        return None;
+    }
+    let nodes: Vec<String> = gains.iter().zip(crate::model::BAND_HZ).enumerate()
+        .map(|(i, (g, f))| format!("{{ type = builtin name = b{i} label = bq_peaking control = {{ Freq = {f:.1} Q = 1.41 Gain = {g}.0 }} }}"))
+        .collect();
+    let links: Vec<String> = (1..gains.len()).map(|i| format!("{{ output = \"b{}:Out\" input = \"b{i}:In\" }}", i - 1)).collect();
+    Some(format!("{{ nodes = [ {} ] links = [ {} ] }}", nodes.join(" "), links.join(" ")))
 }
 
 /// Sends streams whose stereo isn't labelled left/right (e.g. "aux0,aux1")
@@ -671,7 +711,7 @@ pub fn relabel_aux_streams() {
 /// output (True 2.1 uses the front-speakers output).
 pub fn apply_listen(s: &Settings) {
     relabel_aux_streams();
-    spread_streams(s.spread_mode());
+    apply_streams(s);
     if !card::dry_run() {
         fix_defaults(s);
     }
@@ -809,5 +849,21 @@ mod test_sound_tests {
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eq_graph_is_ten_peaking_bands_in_a_row() {
+        assert_eq!(eq_graph(&[0; 10]), None, "nothing to add");
+        let g = eq_graph(&[6, 0, 0, 0, 0, -6, 0, 0, 0, 3]).unwrap();
+        assert_eq!(g.matches("bq_peaking").count(), 10);
+        assert!(g.contains("Freq = 1000.0 Q = 1.41 Gain = -6.0") && g.contains("{ output = \"b8:Out\" input = \"b9:In\" }"));
+        if std::env::var_os("SB_PRINT_GRAPH").is_some() {
+            println!("GRAPH {g}");
+        }
     }
 }

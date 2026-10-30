@@ -1,5 +1,5 @@
 //! The tray icon, run by the background service so it's there even with the
-//! window closed: switch activity, SBX profile, SBX/Pure, 5.1/2.1 and the EQ
+//! window closed: switch the kind of content's sound, SBX profile, SBX/Pure, where stereo plays and the EQ
 //! preset, or open the window. No keyboard shortcuts are registered.
 
 use crate::model::{self, Settings};
@@ -37,12 +37,15 @@ impl Tray {
         let s = &self.s;
         let sound = if s.sbx_active() { format!("SBX {}", s.cur_profile()) } else { "Pure".into() };
         let spk = if s.headphones() { "Headphones".to_string() } else { s.speaker_config.clone() };
-        format!("{} · {sound} · {spk}", model::activity_label(&s.activity))
+        let kind = if s.kind.is_empty() { model::activity_label(&s.activity) } else { model::kind_name(&s.kind) };
+        format!("{kind} · {sound} · {spk}")
     }
 
+    /// A change you make: kept as the current kind of content's own sound too.
     fn edit(&mut self, parts: u32, listen: bool, f: impl FnOnce(&mut Settings)) {
         let mut s = Settings::load();
         f(&mut s);
+        s.remember_kind();
         commit(&s, parts, listen);
         self.s = s;
     }
@@ -66,7 +69,8 @@ impl ksni::Tray for Tray {
     }
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let s = &self.s;
-        let acts: Vec<&str> = model::ACTIVITIES.iter().map(|a| a.0).collect();
+        // Each kind of content's own sound (as in the window's Sound tab).
+        let kind = if s.kind.is_empty() { match s.activity.as_str() { "game" => "game", "movie" => "film", _ => "music" } } else { s.kind.as_str() };
         let styles: Vec<String> = model::styles_for(&s.activity).iter().map(|x| x.to_string()).collect();
         let eqs = s.eq_list();
         let cur_style = s.cur_profile();
@@ -75,12 +79,15 @@ impl ksni::Tray for Tray {
             StandardItem { label: self.summary(), enabled: false, ..Default::default() }.into(),
             MenuItem::Separator,
             RadioGroup {
-                selected: acts.iter().position(|a| *a == s.activity).unwrap_or(2),
+                selected: model::KINDS.iter().position(|k| k.0 == kind).unwrap_or(0),
                 select: Box::new(|t: &mut Self, i| {
-                    let a = model::ACTIVITIES[i].0;
-                    t.edit(part::FX | part::EQ | part::SPEAKER, false, |s| s.set_activity(a));
+                    let k = model::KINDS[i].0;
+                    let mut s = Settings::load();
+                    s.set_kind(k);
+                    commit(&s, part::FX | part::EQ | part::SPEAKER, true);
+                    t.s = s;
                 }),
-                options: model::ACTIVITIES.iter().map(|a| RadioItem { label: a.1.into(), ..Default::default() }).collect(),
+                options: model::KINDS.iter().map(|k| RadioItem { label: k.1.into(), ..Default::default() }).collect(),
             }.into(),
             MenuItem::Separator,
             RadioGroup {

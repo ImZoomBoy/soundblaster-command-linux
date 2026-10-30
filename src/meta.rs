@@ -441,6 +441,34 @@ fn is_tv(np: &NowPlaying) -> bool {
     [&np.title, &np.extra, &np.album].iter().any(|t| tv_numbers(t).is_some())
 }
 
+/// The kind's id for settings ("music", "film", "tv", "game", "sport",
+/// "video", "stream"; see model::KINDS).
+pub fn kind_id(k: &Kind) -> &'static str {
+    match k {
+        Kind::Studio | Kind::LiveSmall | Kind::LiveStadium => "music",
+        Kind::Film => "film",
+        Kind::Tv => "tv",
+        Kind::Game => "game",
+        Kind::Sport => "sport",
+        Kind::Video => "video",
+        Kind::Stream => "stream",
+    }
+}
+
+/// The kind of content a detected source is, from what detection knows (no
+/// lookups, so the background service can use it too).
+pub fn kind_of_detection(d: &crate::detect::Detection) -> &'static str {
+    let np = NowPlaying {
+        activity: d.activity,
+        app: d.source.clone(),
+        title: if d.title.is_empty() { d.detail.clone() } else { d.title.clone() },
+        artist: d.artist.clone(),
+        url: d.url.clone(),
+        ..Default::default()
+    };
+    kind_id(&classify(&np))
+}
+
 /// What kind of content is playing.
 pub fn classify(np: &NowPlaying) -> Kind {
     match np.activity {

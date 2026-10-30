@@ -86,8 +86,12 @@ pub fn eq_curve(bands: &[gtk::Scale]) -> EqCurve {
             let alpha = if on { 1.0 } else { 0.4 };
             cr.select_font_face("Sans", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Normal);
             cr.set_font_size(10.5);
-            // Grid
-            for db in [12.0, 6.0, 0.0, -6.0, -12.0] {
+            // Grid (a short curve leaves out the ±6 lines so their labels don't touch)
+            let short = db_y(6.0, h) - db_y(12.0, h) < 16.0;
+            for db in [12.0_f64, 6.0, 0.0, -6.0, -12.0] {
+                if short && db.abs() == 6.0 {
+                    continue;
+                }
                 let y = db_y(db, h);
                 cr.set_source_rgba(f.0, f.1, f.2, if db == 0.0 { 0.22 } else { 0.07 });
                 cr.set_line_width(1.0);
@@ -459,17 +463,17 @@ pub fn knob(adj: &gtk::Adjustment, power: Option<&gtk::ToggleButton>, size: i32,
     da
 }
 
-/// A vertical LED meter (18 segments), for the mixer.
-pub fn draw_vmeter(cr: &Context, w: f64, h: f64, level: f64) {
-    let n = 18;
+/// A horizontal LED meter (24 segments), under each of the mixer's sliders.
+pub fn draw_hmeter(cr: &Context, w: f64, h: f64, level: f64) {
+    let n = 24;
     let gap = 2.0;
-    let sh = (h - gap * (n - 1) as f64) / n as f64;
+    let sw = (w - gap * (n - 1) as f64) / n as f64;
     for i in 0..n {
-        let y = h - (i + 1) as f64 * sh - i as f64 * gap;
+        let x = i as f64 * (sw + gap);
         let on = level * n as f64 > i as f64 + 0.3;
-        let col = if !on { (1.0, 1.0, 1.0, 0.07) } else if i >= 14 { (1.0, 0.70, 0.28, 1.0) }
-                  else if i >= 10 { (PINK.0, PINK.1, PINK.2, 1.0) } else { (RED.0, RED.1, RED.2, 1.0) };
-        cr.rectangle(0.0, y, w, sh);
+        let col = if !on { (1.0, 1.0, 1.0, 0.07) } else if i >= 19 { (1.0, 0.70, 0.28, 1.0) }
+                  else if i >= 13 { (PINK.0, PINK.1, PINK.2, 1.0) } else { (RED.0, RED.1, RED.2, 1.0) };
+        cr.rectangle(x, 0.0, sw, h);
         cr.set_source_rgba(col.0, col.1, col.2, col.3);
         let _ = cr.fill();
     }

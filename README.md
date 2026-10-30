@@ -61,8 +61,8 @@ one window and works around those defaults.
   films, TV, games, sport or video.
 - **No title bar:** the page fills the window. **☰** at the bottom right opens the **control centre**: one panel
   above the dock with what plays and how (the readout, SBX, the EQ, the song) and tabs for Sound, Mixer,
-  Microphone, Speakers, Look and feel and Settings. It keeps one size whatever you press; each tab scrolls
-  inside it. The window buttons appear at the top right when you point there; drag the page to move the window.
+  Microphone, Speakers, Look and feel and Settings. It keeps one size whatever you press, and every tab
+  fits in it without scrolling, in a small window too. The window buttons appear at the top right when you point there; drag the page to move the window.
 - **Three compact views:** small windows (under 900 × 600) show the **Remote** or **Over your shoulder, mini**
   (your pick in Look and feel). The mini is the main page made tall: the photo printed in red, the artist's neon
   sign (or an LED wall of dots for films and games, a scoreboard for a match), the six dot speakers round you,
@@ -87,8 +87,11 @@ one window and works around those defaults.
 - SBX or Pure mode (Pure turns off the SBX effects; your equaliser stays on).
 - Each source plays on the speakers it was made for, by itself: a stereo song on the fronts and subwoofer,
   a 5.1 film, game or track on all six. Stereo can also play on the rears.
-- Game, Movie & TV and Music modes, picked automatically when Steam, a film or Spotify starts if you want.
-  Settings are remembered per game and app, and the Music EQ can follow each song's genre.
+- Each kind of content keeps its own sound (music, films, TV, games, sport, online video, streams): its SBX
+  profile, EQ, tone and where stereo plays, picked automatically when it starts if you want. Settings are
+  also remembered per game and app, and the Music EQ can follow each song's genre.
+- Several apps at once: a game keeps the card while music plays in the background, and the music keeps its
+  own EQ, tone and speakers (an EQ inside its stream; the card's SBX effects are made lighter while both play).
 - A tray icon for the common switches, so you don't need to open the window.
 - CrystalVoice microphone effects, a mixer with meters, speaker boost, speaker setup and headphone gain.
 
@@ -168,7 +171,7 @@ the microphone and What U Hear recording levels.</td>
 <b>CrystalVoice.</b> Noise Reduction, Smart Volume, Focus (how wide the mic listens), VoiceFX, mic boost,
 What U Hear and a record-and-play-back test.</td>
 <td><img src="docs/screenshots/setup.png" alt="Speaker setup"><br>
-<b>Speaker setup.</b> 2.0 to 5.1, speaker type (including Cambridge SoundWorks DTT2200), full-range
+<b>Speaker setup.</b> 2.0 to 5.1, your speakers' brand and model (Cambridge SoundWorks DTT2200, or the size of other speakers), full-range
 fronts/rears, bass redirection and crossover, headphone gain, and a test sound for every speaker.</td>
 </tr>
 <tr>

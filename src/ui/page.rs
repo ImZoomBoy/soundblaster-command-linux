@@ -155,15 +155,7 @@ fn has_monitor(k: Option<&Kind>) -> bool {
 
 /// The kind of page for a kind of content (for layouts and labels).
 pub fn page_kind(k: &Kind) -> &'static str {
-    match k {
-        Kind::Studio | Kind::LiveSmall | Kind::LiveStadium => "music",
-        Kind::Film => "film",
-        Kind::Tv => "tv",
-        Kind::Game => "game",
-        Kind::Sport => "sport",
-        Kind::Video => "video",
-        Kind::Stream => "stream",
-    }
+    meta::kind_id(k)
 }
 
 fn kind_word(k: &Kind) -> &'static str {
@@ -229,7 +221,7 @@ impl Ui {
     pub(crate) fn layout_now(&self) -> (Layout, bool) {
         let s = self.s.borrow();
         let kind = self.kind_now().map(|k| page_kind(&k)).unwrap_or("music");
-        let compact = s.theme == "compact" || self.page.auto_compact.get();
+        let compact = s.compact_always || self.page.auto_compact.get();
         (Layout::from_id(&s.layout_for(kind)), compact)
     }
 
@@ -607,7 +599,11 @@ impl Ui {
             }
             "tone" => {
                 let t = v.parse::<i32>().unwrap_or(0).clamp(-2, 2);
-                self.s.borrow_mut().tone = t;
+                {
+                    let mut s = self.s.borrow_mut();
+                    s.tone = t;
+                    s.remember_kind();
+                }
                 self.changed(part::EQ);
                 self.refresh();
             }
@@ -1231,6 +1227,8 @@ impl Ui {
     // ---- Look and feel
 
     /// Builds (or rebuilds) the Look and feel panel for the page showing now.
+    /// It fits the control centre without scrolling: small pictures in rows,
+    /// your defaults as one sentence, the compact views as three short lines.
     pub fn build_look_page(self: &Rc<Self>) {
         let p = &self.look_page;
         while let Some(c) = p.first_child() {
@@ -1239,21 +1237,28 @@ impl Ui {
         let s = self.s.borrow().clone();
         let kind = self.kind_now().map(|k| page_kind(&k)).unwrap_or("music");
         let kname = |k: &str| match k { "music" => "music", "film" => "films", "tv" => "TV", "game" => "games", "sport" => "sport", "video" => "online video", _ => "streams" };
-        let section = |t: &str| gtk::Label::builder().label(t).xalign(0.0).css_classes(["lf-h"]).build();
-        // Theme
-        p.append(&section("THEME"));
-        let tf = gtk::FlowBox::builder().selection_mode(gtk::SelectionMode::None).max_children_per_line(3).min_children_per_line(2)
-            .column_spacing(8).row_spacing(8).homogeneous(true).build();
-        for (id, name) in model::THEMES {
-            let b = gtk::Button::builder().css_classes(["lf-card"]).build();
-            let bx = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
-            let da = gtk::DrawingArea::builder().content_width(120).content_height(64).build();
-            let tid = id;
-            da.set_draw_func(move |_, cr, w, h| draw_theme_preview(cr, w as f64, h as f64, tid));
+        // A section's heading, with room for buttons on its right.
+        let head = |t: &str| {
+            let h = gtk::Box::builder().spacing(6).build();
+            h.append(&gtk::Label::builder().label(t).xalign(0.0).hexpand(true).valign(gtk::Align::Center).css_classes(["lf-h"]).build());
+            h
+        };
+        // A small picture with its name under it.
+        let tile = |name: &str, tip: &str, on: bool, draw: Box<dyn Fn(&gtk::cairo::Context, f64, f64)>| {
+            let bx = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
+            let da = gtk::DrawingArea::builder().content_width(40).content_height(30).hexpand(true).build();
+            da.set_draw_func(move |_, cr, w, h| draw(cr, w as f64, h as f64));
             bx.append(&da);
-            bx.append(&gtk::Label::builder().label(name).xalign(0.0).css_classes(["lf-n"]).build());
-            b.set_child(Some(&bx));
-            if s.theme == id { b.add_css_class("on"); }
+            bx.append(&gtk::Label::builder().label(name).xalign(0.0).wrap(true).lines(2).css_classes(["lf-n"]).build());
+            let b = gtk::Button::builder().child(&bx).tooltip_text(tip).css_classes(["lf-card"]).build();
+            if on { b.add_css_class("on"); }
+            b
+        };
+        // Theme: five pictures in a row.
+        p.append(&head("THEME"));
+        let tf = gtk::Box::builder().spacing(3).homogeneous(true).build();
+        for (id, name) in model::THEMES {
+            let b = tile(name, name, s.theme == id, Box::new(move |cr, w, h| draw_theme_preview(cr, w, h, id)));
             let wk = Rc::downgrade(self);
             b.connect_clicked(move |_| if let Some(u) = wk.upgrade() {
                 u.s.borrow_mut().theme = id.into();
@@ -1261,46 +1266,24 @@ impl Ui {
                 u.update_stage();
                 u.build_look_page();
             });
-            tf.insert(&b, -1);
+            tf.append(&b);
         }
         p.append(&tf);
-        // Layout
-        p.append(&section("LAYOUT"));
+        // Layout: four to a row; Save and Back sit by the heading once one is picked.
         let own = s.layout_defaults.get(kind).cloned()
             .unwrap_or_else(|| model::LAYOUT_DEFAULTS.iter().find(|x| x.0 == kind).map_or("slim", |x| x.1).to_string());
-        let lf = gtk::FlowBox::builder().selection_mode(gtk::SelectionMode::None).max_children_per_line(3).min_children_per_line(2)
-            .column_spacing(8).row_spacing(8).homogeneous(true).build();
-        let mut ids: Vec<(String, String)> = vec![("default".into(), format!("Default ({})", layout_name(&own)))];
+        let mut ids: Vec<(String, String)> = vec![("default".into(), "Default".into())];
         for (id, name, _) in model::LAYOUTS {
             if model::fit_layout(kind, id, &own) == id {
                 ids.push((id.into(), name.into()));
             }
         }
         let chosen = if s.layout.is_empty() { "default".to_string() } else { s.layout.clone() };
-        for (id, name) in ids {
-            let b = gtk::Button::builder().css_classes(["lf-card"]).tooltip_text(model::LAYOUTS.iter().find(|x| x.0 == id).map_or("Each kind of page uses its own layout", |x| x.2)).build();
-            let bx = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
-            let da = gtk::DrawingArea::builder().content_width(120).content_height(70).build();
-            let lid = id.clone();
-            da.set_draw_func(move |_, cr, w, h| draw_layout_preview(cr, w as f64, h as f64, &lid));
-            bx.append(&da);
-            bx.append(&gtk::Label::builder().label(&name).xalign(0.0).wrap(true).css_classes(["lf-n"]).build());
-            b.set_child(Some(&bx));
-            if chosen == id { b.add_css_class("on"); }
-            let wk = Rc::downgrade(self);
-            b.connect_clicked(move |_| if let Some(u) = wk.upgrade() {
-                u.s.borrow_mut().layout = id.clone();
-                u.save_now();
-                u.update_stage();
-                u.build_look_page();
-            });
-            lf.insert(&b, -1);
-        }
-        p.append(&lf);
+        let lh = head("LAYOUT");
         if chosen != "default" {
-            let acts = gtk::Box::builder().spacing(8).margin_top(4).build();
-            let save = gtk::Button::builder().label(format!("Save as the default for {}", kname(kind))).css_classes(["lf-save"]).build();
-            let back = gtk::Button::builder().label("↺ Back to the default view").css_classes(["lf-back"]).build();
+            let save = gtk::Button::builder().label(format!("Save for {}", kname(kind))).css_classes(["lf-save"])
+                .tooltip_text(format!("Pages of {} open with this layout from now on", kname(kind))).build();
+            let back = gtk::Button::builder().label("↺ Default").css_classes(["lf-back"]).tooltip_text("Back to the default view").build();
             let wk = Rc::downgrade(self);
             let k2 = kind.to_string();
             save.connect_clicked(move |_| if let Some(u) = wk.upgrade() {
@@ -1324,25 +1307,30 @@ impl Ui {
                 u.update_stage();
                 u.build_look_page();
             });
-            acts.append(&save);
-            acts.append(&back);
-            p.append(&acts);
+            lh.append(&save);
+            lh.append(&back);
         }
-        p.append(&gtk::Label::builder().label("A layout you pick applies to every page until you save it as one kind’s default. Default lets each kind use its own.")
-            .xalign(0.0).wrap(true).css_classes(["lf-hint"]).build());
-        // Your defaults
-        p.append(&section("YOUR DEFAULTS"));
-        let grid = gtk::Grid::builder().column_spacing(10).row_spacing(6).column_homogeneous(true).build();
-        for (i, (k, _)) in model::LAYOUT_DEFAULTS.iter().enumerate() {
-            let cur = s.layout_defaults.get(*k).cloned().unwrap_or_else(|| model::LAYOUT_DEFAULTS[i].1.to_string());
-            let b = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(if *k == kind { vec!["lf-def", "now"] } else { vec!["lf-def"] }).build();
-            b.append(&gtk::Label::builder().label(kname(k)).xalign(0.0).css_classes(["lf-dk"]).build());
-            b.append(&gtk::Label::builder().label(layout_name(&cur)).xalign(0.0).css_classes(["lf-dv"]).build());
-            grid.attach(&b, (i % 2) as i32, (i / 2) as i32, 1, 1);
+        p.append(&lh);
+        let lf = gtk::Grid::builder().column_spacing(4).row_spacing(4).column_homogeneous(true).build();
+        for (i, (id, name)) in ids.into_iter().enumerate() {
+            let tip = if id == "default" { format!("Each kind of page uses its own layout ({} for {})", layout_name(&own), kname(kind)) }
+                      else { model::LAYOUTS.iter().find(|x| x.0 == id).map_or(String::new(), |x| x.2.to_string()) };
+            let lid = id.clone();
+            let b = tile(&name, &tip, chosen == id, Box::new(move |cr, w, h| draw_layout_preview(cr, w, h, &lid)));
+            let wk = Rc::downgrade(self);
+            b.connect_clicked(move |_| if let Some(u) = wk.upgrade() {
+                u.s.borrow_mut().layout = id.clone();
+                u.save_now();
+                u.update_stage();
+                u.build_look_page();
+            });
+            lf.attach(&b, (i % 4) as i32, (i / 4) as i32, 1, 1);
         }
-        p.append(&grid);
+        p.append(&lf);
+        // Your defaults, as one sentence: which kinds open with which layout.
+        let dh = head("YOUR DEFAULTS");
         if !s.layout_defaults.is_empty() {
-            let reset = gtk::Button::builder().label("Reset to the original defaults").css_classes(["lf-link"]).halign(gtk::Align::Start).build();
+            let reset = gtk::Button::builder().label("Reset").css_classes(["lf-link"]).tooltip_text("Back to the original defaults").build();
             let wk = Rc::downgrade(self);
             reset.connect_clicked(move |_| if let Some(u) = wk.upgrade() {
                 {
@@ -1355,58 +1343,87 @@ impl Ui {
                 u.update_stage();
                 u.build_look_page();
             });
-            p.append(&reset);
+            dh.append(&reset);
         }
-        // The compact views: the Remote or the mini for small windows, the Strip for the edge of a screen.
-        p.append(&section("THE COMPACT VIEWS"));
-        p.append(&gtk::Label::builder().label("Small windows (under 900 × 600) show:").xalign(0.0).wrap(true).css_classes(["lf-hint"]).build());
-        let views = gtk::Box::builder().spacing(8).homogeneous(true).build();
-        for (id, name, sub) in [("remote", "The Remote", "A tall card: photo, speakers, four tiles"),
-                                ("mini", "Over your shoulder, mini", "The main page made tall: neon, dot speakers, rows")] {
-            let bx = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
-            bx.append(&gtk::Label::builder().label(name).xalign(0.0).css_classes(["lf-n"]).build());
-            bx.append(&gtk::Label::builder().label(sub).xalign(0.0).wrap(true).css_classes(["lf-dk"]).build());
-            let b = gtk::Button::builder().child(&bx).css_classes(if s.compact_view == id { vec!["lf-card", "on"] } else { vec!["lf-card"] }).build();
-            let wk = Rc::downgrade(self);
-            b.connect_clicked(move |_| if let Some(u) = wk.upgrade() {
+        p.append(&dh);
+        let mut groups: Vec<(String, Vec<&str>)> = vec![];
+        for (k, d) in model::LAYOUT_DEFAULTS {
+            let n = layout_name(&s.layout_defaults.get(k).cloned().unwrap_or_else(|| d.to_string()));
+            match groups.iter_mut().find(|g| g.0 == n) {
+                Some(g) => g.1.push(k),
+                None => groups.push((n, vec![k])),
+            }
+        }
+        let sentence = groups.iter().map(|(n, ks)| {
+            let mut first = true;
+            let names: Vec<String> = ks.iter().map(|k| {
+                let mut t = kname(k).to_string();
+                if std::mem::take(&mut first) {
+                    let mut c = t.chars();
+                    t = c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default();
+                }
+                if *k == kind { format!("<b>{t}</b>") } else { t }
+            }).collect();
+            let list = match names.split_last() {
+                Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+                _ => names.concat(),
+            };
+            format!("{list} open with {}.", glib::markup_escape_text(n))
+        }).collect::<Vec<_>>().join(" ");
+        p.append(&gtk::Label::builder().label(&sentence).use_markup(true).xalign(0.0).wrap(true).width_chars(30).max_width_chars(30)
+            .css_classes(["lf-hint"]).build());
+        // The compact views: what small windows show, the Remote's top, the Strip.
+        p.append(&head("THE COMPACT VIEWS"));
+        let choice = |text: &str, tip: &str, items: [(&'static str, &'static str, &'static str); 2], cur: &str, act: fn(&Rc<Ui>, &str)| {
+            let row = gtk::Box::builder().spacing(10).build();
+            row.append(&gtk::Label::builder().label(text).tooltip_text(tip).xalign(0.0).hexpand(true).css_classes(["lf-row"]).build());
+            let (seg, btns) = segmented(&items.map(|x| x.1), false);
+            for (b, (id, _, about)) in btns.iter().zip(items) {
+                b.set_active(cur == id);
+                b.set_tooltip_text(Some(about));
+                let wk = Rc::downgrade(self);
+                b.connect_toggled(move |b| if b.is_active() && let Some(u) = wk.upgrade() { act(&u, id) });
+            }
+            row.append(&seg);
+            row
+        };
+        p.append(&choice("Small windows show", "Windows under 900 × 600", [
+            ("remote", "Remote", "The Remote: a tall card with the photo, the speakers and four tiles"),
+            ("mini", "Mini", "Over your shoulder, mini: the main page made tall, with the neon sign and dot speakers")],
+            &s.compact_view, |u, id| {
                 u.s.borrow_mut().compact_view = id.into();
                 u.save_now();
                 let (w, h) = (u.sizer.width(), u.sizer.height());
                 u.on_window_size(w, h);
                 u.build_look_page();
-            });
-            views.append(&b);
-        }
-        p.append(&views);
-        p.append(&gtk::Label::builder().label("The Remote’s top shows:").xalign(0.0).wrap(true).css_classes(["lf-hint"]).build());
-        let tops = gtk::Box::builder().spacing(8).homogeneous(true).build();
-        for (id, name, sub) in [("photo", "The artist photo", "Printed in red, the cover by the title"), ("album", "The album art", "Whole and in colour")] {
-            let bx = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
-            bx.append(&gtk::Label::builder().label(name).xalign(0.0).css_classes(["lf-n"]).build());
-            bx.append(&gtk::Label::builder().label(sub).xalign(0.0).wrap(true).css_classes(["lf-dk"]).build());
-            let b = gtk::Button::builder().child(&bx).css_classes(if s.compact_top == id { vec!["lf-card", "on"] } else { vec!["lf-card"] }).build();
-            let wk = Rc::downgrade(self);
-            b.connect_clicked(move |_| if let Some(u) = wk.upgrade() {
-                u.s.borrow_mut().compact_top = id.into();
-                u.save_now();
-                u.update_stage();
-                u.build_look_page();
-            });
-            tops.append(&b);
-        }
-        p.append(&tops);
-        p.append(&gtk::Label::builder().label("The Strip is one thin row you can leave at the edge of a screen, or on a second screen, all day.")
-            .xalign(0.0).wrap(true).css_classes(["lf-hint"]).build());
-        let srow = gtk::Box::builder().spacing(10).build();
-        let go = gtk::Button::builder().label("Switch to the Strip").css_classes(["lf-save"]).build();
+            }));
+        // The compact view in big windows too (it was the "Compact" theme).
+        let arow = gtk::Box::builder().spacing(10).build();
+        arow.append(&gtk::Label::builder().label("In big windows too").xalign(0.0).hexpand(true).css_classes(["lf-row"]).build());
+        let always = gtk::Switch::builder().active(s.compact_always).valign(gtk::Align::Center)
+            .tooltip_text("Show the compact view whatever the window's size").build();
         let wk = Rc::downgrade(self);
-        go.connect_clicked(move |_| if let Some(u) = wk.upgrade() { u.close_panel(); u.set_strip(true) });
-        srow.append(&go);
-        let pin = gtk::CheckButton::builder().label("Keep it above other windows").active(s.strip_pin).build();
-        let wk = Rc::downgrade(self);
-        pin.connect_toggled(move |b| if let Some(u) = wk.upgrade() { u.page_action(if b.is_active() { "pin-on" } else { "pin-off" }) });
-        srow.append(&pin);
-        p.append(&srow);
+        always.connect_active_notify(move |b| if let Some(u) = wk.upgrade() {
+            u.s.borrow_mut().compact_always = b.is_active();
+            u.save_now();
+            u.update_stage();
+            let (w, h) = (u.sizer.width(), u.sizer.height());
+            u.on_window_size(w, h);
+        });
+        arow.append(&always);
+        p.append(&arow);
+        // (the Remote's top only matters when the Remote is the view picked)
+        if s.compact_view == "remote" {
+            p.append(&choice("The Remote’s top", "What fills the top of the Remote", [
+                ("photo", "Photo", "The artist photo printed in red, the cover by the title"),
+                ("album", "Album", "The album art, whole and in colour")],
+                &s.compact_top, |u, id| {
+                    u.s.borrow_mut().compact_top = id.into();
+                    u.save_now();
+                    u.update_stage();
+                    u.build_look_page();
+                }));
+        }
     }
 }
 
@@ -1502,32 +1519,6 @@ fn draw_theme_preview(cr: &gtk::cairo::Context, w: f64, h: f64, id: &str) {
             cr.move_to(0.0, h * 0.85);
             cr.line_to(w * 0.4, h * 0.55);
             let _ = cr.stroke();
-        }
-        "compact" => {
-            // The Remote: a tall card, the photo in red at the top, the title, the speaker ring, four tiles.
-            let (x0, cw) = (w * 0.38, w * 0.24);
-            cr.set_source_rgb(0.09, 0.09, 0.1);
-            cr.rectangle(x0, h * 0.06, cw, h * 0.88);
-            let _ = cr.fill();
-            cr.set_source_rgb(r, g, b);
-            cr.rectangle(x0, h * 0.06, cw, h * 0.26);
-            let _ = cr.fill();
-            cr.set_source_rgb(1.0, 1.0, 1.0);
-            cr.rectangle(x0 + cw * 0.1, h * 0.27, cw * 0.55, h * 0.05);
-            let _ = cr.fill();
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.5);
-            cr.save().ok();
-            cr.translate(x0 + cw / 2.0, h * 0.5);
-            cr.scale(cw * 0.36, h * 0.09);
-            cr.arc(0.0, 0.0, 1.0, 0.0, 6.283);
-            cr.restore().ok();
-            cr.set_line_width(1.0);
-            let _ = cr.stroke();
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.75);
-            for i in 0..4 {
-                cr.rectangle(x0 + cw * (0.08 + (i % 2) as f64 * 0.44), h * (0.66 + (i / 2) as f64 * 0.12), cw * 0.4, h * 0.09);
-            }
-            let _ = cr.fill();
         }
         _ => {
             cr.set_source_rgba(r, g, b, 0.9);
@@ -1851,7 +1842,7 @@ impl Ui {
     /// The page for a full-size window, the Remote for a small one (under
     /// 900 x 600, or the Compact theme), the Strip for a thin one (or when asked).
     pub fn on_window_size(self: &Rc<Self>, w: i32, h: i32) {
-        let compact_theme = self.s.borrow().theme == "compact";
+        let compact_theme = self.s.borrow().compact_always;
         let small = w < 900 || h < 600;
         let mini = self.s.borrow().compact_view == "mini";
         let view = if self.strip_on.get() || h < 150 { "strip" } else if compact_theme || small { if mini { "mini" } else { "remote" } } else { "page" };
@@ -1876,17 +1867,48 @@ impl Ui {
         if strip { self.close_panel() }
     }
 
+    /// A narrow control centre (a small window, or the default 1240 px one)
+    /// fits its width: the tab names shorten and the pages' side margins slim down.
+    fn narrow_panel(&self, narrow: bool) {
+        if self.panel_narrow.replace(narrow) == narrow { return; }
+        if narrow { self.side_box.add_css_class("narrow") } else { self.side_box.remove_css_class("narrow") }
+        for (id, b) in &self.cc_tabs {
+            b.set_label(match (*id, narrow) {
+                ("sound", _) => "Sound", ("mixer", _) => "Mixer", ("crystalvoice", true) => "Mic", ("crystalvoice", false) => "Microphone",
+                ("setup", _) => "Speakers", ("look", true) => "Look", ("look", false) => "Look and feel", _ => "Settings",
+            });
+        }
+        let m = if narrow { 12 } else { 18 };
+        let mut c = self.side_stack.first_child();
+        while let Some(sw) = c {
+            if let Some(inner) = sw.downcast_ref::<gtk::ScrolledWindow>().and_then(|s| s.child()).and_then(|v| v.first_child()) {
+                inner.set_margin_start(m);
+                inner.set_margin_end(m);
+            }
+            c = sw.next_sibling();
+        }
+        if let Some(tb) = self.cc_tabs.first().and_then(|(_, b)| b.parent()) {
+            tb.set_margin_start(if narrow { 8 } else { 14 });
+            tb.set_margin_end(if narrow { 8 } else { 14 });
+        }
+        if let Some(u) = crate::ui::UI.with(|c| c.borrow().as_ref().and_then(|w| w.upgrade())) && self.current_page() == "look" {
+            u.build_look_page();
+        }
+    }
+
     /// The control centre's size comes from the window only (never from what's
     /// in it): above the dock at the bottom right, or most of a small window,
     /// always below the window buttons.
     fn size_panel(&self, w: i32, h: i32, view: &str) {
         let page = view == "page";
         let (pw, ph, me, mb) = if page {
-            (((w as f64 * 0.42).clamp(520.0, 640.0) as i32).min(w - 48), (h - 84 - 56).min(820), 24, 84)
+            (((w as f64 * 0.46).clamp(520.0, 660.0) as i32).min(w - 48), (h - 84 - 56).min(820), 24, 84)
         } else {
             (w - 24, h - 52 - 12, 12, 12)
         };
         self.side_box.set_size_request(pw.max(320), ph.max(300));
+        // The full layout needs about 600 px (Sound's five knobs in a row).
+        self.narrow_panel(pw < 600);
         self.cc_rev.set_margin_end(me);
         self.cc_rev.set_margin_bottom(mb);
     }

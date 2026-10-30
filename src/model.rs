@@ -7,8 +7,11 @@ use std::path::PathBuf;
 pub const SPEAKER_CONFIGS: [&str; 5] = ["2.0", "2.1", "4.0", "4.1", "5.1"];
 pub const SPEAKER_CONFIG_LABELS: [&str; 5] =
     ["Stereo", "2.1 Surround", "4.0 Surround", "4.1 Surround", "5.1 Surround"];
-pub const SPEAKER_TYPES: [&str; 5] = ["desktop", "bookshelf", "tower", "dtt2200", "custom"];
-pub const SPEAKER_TYPE_LABELS: [&str; 5] = ["Desktop", "Bookshelf", "Tower", "Cambridge DTT2200", "Custom"];
+/// Your speakers' brand and model (each sets the crossover and full-range
+/// for them), or, for speakers without their own settings, their size.
+pub const SPEAKER_TYPES: [&str; 5] = ["dtt2200", "desktop", "bookshelf", "tower", "custom"];
+pub const SPEAKER_TYPE_LABELS: [&str; 5] = ["Cambridge SoundWorks DTT2200", "Other: small desktop speakers", "Other: bookshelf speakers",
+                                            "Other: floor-standing speakers", "Set by hand"];
 /// The DTT2200's small satellites can't play deep bass, so the subwoofer takes more.
 pub const DTT2200_CROSSOVER: i32 = 140;
 pub const SVM_MODES: [&str; 3] = ["Normal", "Loud", "Night"];
@@ -352,12 +355,26 @@ pub struct Settings {
     pub remember_apps: bool,
     /// Game or app name → what was last used with it.
     pub app_memory: BTreeMap<String, AppMemory>,
+    /// The kind of content the sound is set for ("music", "film", … see KINDS;
+    /// empty before anything has played).
+    pub kind: String,
+    /// Each kind of content's own sound, once you've changed it (until then it
+    /// starts from what was in use).
+    pub kinds: BTreeMap<String, KindSound>,
+    /// When several apps play, each gets its own kind's EQ, tone and "Stereo
+    /// plays on" (an EQ inside its stream); the card's SBX follows the one that
+    /// sets the card.
+    pub per_app: bool,
+    /// Not saved: music plays beside a game, so the card's effects are lighter
+    /// for both (see `beside_fx`). Set by whoever writes to the card.
+    #[serde(skip)]
+    pub blend: bool,
     /// Show the tray icon (from the background service).
     pub tray: bool,
     /// With 5.1 speakers, where stereo plays: "front" or "rear" (see STEREO_ON).
     pub stereo_on: String,
     /// Look and feel: the room's theme ("oys" Over your shoulder, "blueprint",
-    /// "screenprint", "callouts") or "compact", the smaller view.
+    /// "screenprint", "callouts"). (The old "compact" theme is `compact_always`.)
     pub theme: String,
     /// Look and feel: one layout for every page, or "default" so each kind of
     /// page uses its own (see LAYOUT_DEFAULTS and `layout_defaults`).
@@ -372,6 +389,8 @@ pub struct Settings {
     /// What small windows show: "remote" (the tall card) or "mini" (Over your
     /// shoulder, mini: the main page made tall).
     pub compact_view: String,
+    /// The compact view in big windows too (it was the "Compact" theme).
+    pub compact_always: bool,
     /// Tone: -2 much warmer .. 0 as mixed .. +2 much brighter, on top of the EQ.
     pub tone: i32,
     /// Look up pictures, logos and details online (TheAudioDB, Steam, TMDB).
@@ -401,9 +420,9 @@ pub const LAYOUTS: [(&str, &str, &str); 7] = [
 ];
 
 /// Themes for the room: (id, name).
-pub const THEMES: [(&str, &str); 5] = [
+pub const THEMES: [(&str, &str); 4] = [
     ("oys", "Over your shoulder"), ("blueprint", "Blueprint"), ("screenprint", "Screenprint"),
-    ("callouts", "Callouts"), ("compact", "Compact"),
+    ("callouts", "Callouts"),
 ];
 
 /// What the tone choice adds to each EQ band (dB) for one step warmer;
@@ -447,6 +466,33 @@ pub const STEREO_ON: [(&str, &str, &str); 2] = [
     ("front", "Fronts", "Stereo plays on the front speakers only, exactly as mixed."),
     ("rear", "+ Rears", "Stereo also plays on the rear speakers, a little quieter."),
 ];
+
+/// The seven kinds of content the page knows: (id, name, the activity whose
+/// SBX profiles it uses). Each keeps its own sound (see `KindSound`).
+pub const KINDS: [(&str, &str, &str); 7] = [
+    ("music", "Music", "music"), ("film", "Films", "movie"), ("tv", "TV", "movie"), ("game", "Games", "game"),
+    ("sport", "Sport", "movie"), ("video", "Online video", "movie"), ("stream", "Streams", "movie"),
+];
+
+pub fn kind_activity(k: &str) -> &'static str {
+    KINDS.iter().find(|x| x.0 == k).map_or("movie", |x| x.2)
+}
+
+pub fn kind_name(k: &str) -> &'static str {
+    KINDS.iter().find(|x| x.0 == k).map_or("This", |x| x.1)
+}
+
+/// What one kind of content plays with: its Room (SBX profile, or SBX off),
+/// EQ, tone and where stereo plays.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct KindSound {
+    pub profile: String,
+    pub eq: String,
+    pub tone: i32,
+    pub stereo_on: String,
+    pub sbx: bool,
+}
 
 /// What was last used with one game or app.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
@@ -619,6 +665,10 @@ impl Default for Settings {
             boost_db: 0.0,
             remember_apps: true,
             app_memory: BTreeMap::new(),
+            kind: String::new(),
+            kinds: BTreeMap::new(),
+            per_app: true,
+            blend: false,
             tray: true,
             stereo_on: "front".into(),
             theme: "oys".into(),
@@ -627,6 +677,7 @@ impl Default for Settings {
             compact_top: "photo".into(),
             strip_pin: false,
             compact_view: "remote".into(),
+            compact_always: false,
             tone: 0,
             pictures_online: true,
             tmdb_key: String::new(),
@@ -717,6 +768,20 @@ impl Settings {
         }
         if !SPEAKER_CONFIGS.contains(&self.speaker_config.as_str()) {
             self.speaker_config = "5.1".into();
+        }
+        // The "Compact" theme became "the compact view in big windows too".
+        if self.theme == "compact" {
+            self.theme = "oys".into();
+            self.compact_always = true;
+        }
+        // "Equaliser on" was removed (Flat sounds the same): a saved "off" becomes Flat.
+        if !self.eq_enabled {
+            self.eq.speakers = "Flat".into();
+            self.eq.headphones = "Flat".into();
+            for v in self.eqs.values_mut() {
+                *v = "Flat".into();
+            }
+            self.eq_enabled = true;
         }
         if !SPEAKER_TYPES.contains(&self.speaker_type.as_str()) {
             self.speaker_type = "desktop".into();
@@ -847,6 +912,71 @@ impl Settings {
     /// When a game starts: Creative's own profile and EQ for it if there is
     /// one, otherwise back to your usual game profile and EQ. Your per-game
     /// memory (recall_app) comes first. True if anything changed.
+    /// A kind of content's own sound (or, until it has one, what's in use).
+    pub fn kind_sound(&self, k: &str) -> KindSound {
+        self.kinds.get(k).cloned().unwrap_or_else(|| {
+            let a = kind_activity(k);
+            KindSound {
+                profile: if self.activity == a { self.cur_profile() } else { self.style_of(a) },
+                eq: self.eqs.get(a).filter(|e| self.has_eq(e)).cloned().unwrap_or_else(|| self.cur_eq()),
+                tone: self.tone,
+                stereo_on: self.stereo_on.clone(),
+                sbx: self.sbx_enabled,
+            }
+        })
+    }
+
+    fn sound_now(&self) -> (String, String, String, i32, String, bool) {
+        (self.activity.clone(), self.cur_profile(), self.cur_eq(), self.tone, self.stereo_on.clone(), self.sbx_enabled)
+    }
+
+    /// Plays with a kind of content's own sound. True if anything changed.
+    pub fn set_kind(&mut self, k: &str) -> bool {
+        if !KINDS.iter().any(|x| x.0 == k) {
+            return false;
+        }
+        let before = self.sound_now();
+        let ks = self.kind_sound(k);
+        self.kind = k.into();
+        let a = kind_activity(k);
+        if self.activity != a {
+            self.set_activity(a);
+        }
+        if self.has_profile(&ks.profile) {
+            self.set_cur_profile(&ks.profile);
+        }
+        if self.has_eq(&ks.eq) {
+            self.eq.speakers = ks.eq.clone();
+            self.eq.headphones = ks.eq;
+        }
+        self.tone = ks.tone.clamp(-2, 2);
+        if STEREO_ON.iter().any(|x| x.0 == ks.stereo_on) {
+            self.stereo_on = ks.stereo_on;
+        }
+        self.sbx_enabled = ks.sbx;
+        before != self.sound_now()
+    }
+
+    /// Keeps the sound in use as the current kind's own (after you change it).
+    pub fn remember_kind(&mut self) {
+        if self.kind.is_empty() {
+            return;
+        }
+        let ks = KindSound { profile: self.cur_profile(), eq: self.cur_eq(), tone: self.tone, stereo_on: self.stereo_on.clone(), sbx: self.sbx_enabled };
+        self.kinds.insert(self.kind.clone(), ks);
+    }
+
+    /// Something new is playing: its kind's own sound, then what you last used
+    /// with that game or app, then a game's own Creative profile. True if
+    /// anything changed.
+    pub fn switch_for(&mut self, kind: &str, source: &str) -> bool {
+        let before = self.sound_now();
+        self.set_kind(kind);
+        self.recall_app(source);
+        self.follow_game(source);
+        before != self.sound_now()
+    }
+
     pub fn follow_game(&mut self, source: &str) -> bool {
         if self.activity != "game" {
             return false;
@@ -943,9 +1073,21 @@ pub fn channel_delays(s: &Settings) -> Vec<(&'static str, f64)> {
         .collect()
 }
 
+/// Music beside a game: the card runs one set of effects for both, so the two
+/// that spoil music are eased: Surround halved and Smart Volume (which squeezes
+/// loud and quiet together) off, unless Scout Mode wants it for footsteps.
+pub fn beside_fx(mut p: Fx, scout: bool) -> Fx {
+    p.surround.1 /= 2;
+    if !scout {
+        p.smart_volume.0 = false;
+    }
+    p
+}
+
 pub fn fx_pairs(s: &Settings) -> Pairs {
     let p = s.fx_of(&s.cur_profile());
     let p = if s.scout && s.sbx_active() { scout_fx(p) } else { p };
+    let p = if s.blend { beside_fx(p, s.scout && s.sbx_active()) } else { p };
     let on = s.sbx_active();
     vec![
         ("FX: Surround Playback Switch", V::B(on && p.surround.0)),
@@ -1017,7 +1159,7 @@ impl Settings {
     }
 }
 
-const BAND_HZ: [f64; 10] = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
+pub const BAND_HZ: [f64; 10] = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
 
 /// The Linux driver turns SBX Bass (X-Bass) off whenever the speakers have a
 /// subwoofer (2.1, 4.1, 5.1): see ca0132_effects_set. So that the Bass slider
@@ -1037,6 +1179,17 @@ pub fn bass_boost(s: &Settings) -> Vec<f64> {
     let gain = 8.0 * p.bass.1.clamp(0, 100) as f64 / 100.0;
     let xover = p.bass_xover.max(20) as f64;
     BAND_HZ.iter().map(|f| if *f <= xover { gain } else if *f <= xover * 2.0 { gain / 2.0 } else { 0.0 }).collect()
+}
+
+/// What an app of another kind than the one setting the card plays with: the
+/// EQ to add inside its stream (dB per band) so it ends with its own kind's
+/// curve (preset, tone, Bass through the EQ), and where its stereo plays.
+pub fn stream_sound(s: &Settings, kind: &str) -> (Vec<i32>, String) {
+    let mut t = s.clone();
+    t.set_kind(kind);
+    let curve = |x: &Settings| { let (c, on) = effective_eq(x); if on { c } else { vec![0; 10] } };
+    let (own, card) = (curve(&t), curve(s));
+    (own.iter().zip(&card).map(|(a, b)| (a - b).clamp(-24, 24)).collect(), t.spread_mode().to_string())
 }
 
 /// The EQ curve sent to the card, and whether the EQ is on. Pure (SBX off)
@@ -1287,6 +1440,68 @@ mod tests {
         assert_eq!(effective_eq(&s).0, vec![3; 10], "your own preset");
         s.scout = true;
         assert_eq!(effective_eq(&s).0, SCOUT_EQ.to_vec());
+    }
+
+    #[test]
+    fn each_kind_keeps_its_own_sound() {
+        let mut s = Settings::default();
+        s.set_kind("film");
+        s.set_style("Night");
+        s.tone = -1;
+        s.remember_kind();
+        s.set_kind("tv");
+        s.set_style("Cinema");
+        s.tone = 0;
+        s.stereo_on = "rear".into();
+        s.remember_kind();
+        assert!(s.set_kind("film"));
+        assert_eq!((s.cur_profile().as_str(), s.tone, s.stereo_on.as_str()), ("Night", -1, "front"));
+        s.set_kind("tv");
+        assert_eq!((s.cur_profile().as_str(), s.tone, s.stereo_on.as_str()), ("Cinema", 0, "rear"));
+        // A kind never changed starts from what's in use; games use the game profiles.
+        s.set_kind("game");
+        assert_eq!(s.activity, "game");
+        assert!(styles_for("game").contains(&s.cur_profile().as_str()));
+        assert!(!s.set_kind("nonsense"));
+    }
+
+    #[test]
+    fn an_app_of_another_kind_gets_its_own_eq_and_stereo() {
+        let mut s = Settings::default();
+        s.set_kind("music");
+        s.set_eq("Rock");
+        s.stereo_on = "rear".into();
+        s.remember_kind();
+        s.set_kind("game");
+        s.set_eq("Flat");
+        s.stereo_on = "front".into();
+        s.remember_kind();
+        // The game sets the card; music beside it adds Rock on top of the card's curve.
+        let (eq, mode) = stream_sound(&s, "music");
+        let mut t = s.clone();
+        t.set_kind("music");
+        let want: Vec<i32> = effective_eq(&t).0.iter().zip(effective_eq(&s).0.iter()).map(|(a, b)| a - b).collect();
+        assert_eq!(eq, want);
+        assert!(eq.iter().any(|g| *g != 0), "Rock differs from the game's curve");
+        assert_eq!(mode, "rear");
+        assert_eq!(stream_sound(&s, "game").0, vec![0; 10], "the kind setting the card needs nothing added");
+        // Lighter effects for both while music plays beside the game.
+        let p = s.fx_of("Gaming");
+        let b = beside_fx(p.clone(), false);
+        assert_eq!((b.surround.1, b.smart_volume.0), (p.surround.1 / 2, false));
+        assert!(beside_fx(p, true).smart_volume.0, "Scout keeps Smart Volume");
+    }
+
+    #[test]
+    fn removed_settings_carry_over() {
+        // "Equaliser on" off becomes Flat; the "Compact" theme becomes the compact view in big windows too.
+        let mut s = Settings::default();
+        s.set_eq("Rock");
+        s.eq_enabled = false;
+        s.theme = "compact".into();
+        s.sanitise();
+        assert!(s.eq_enabled && s.cur_eq() == "Flat" && s.eqs.values().all(|v| v == "Flat"));
+        assert!(s.compact_always && s.theme == "oys");
     }
 
     #[test]

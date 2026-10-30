@@ -114,7 +114,38 @@ progressbar.pink progress { background: #ff416c; }
 .cc-tabs button { border-radius: 999px; padding: 6px 14px; min-height: 0; background: none; box-shadow: none; font-weight: 700; font-size: 13px; color: alpha(white, 0.62); }
 .cc-tabs button:hover { background: alpha(white, 0.06); color: white; }
 .cc-tabs button:checked { background: white; color: black; }
+.cc.narrow .cc-tabs { border-spacing: 2px; }
+.cc.narrow .cc-tabs button { padding: 6px 8px; font-size: 12.5px; }
 .cc separator { background: alpha(white, 0.08); min-height: 1px; }
+/* The pages fit the control centre without scrolling: compact rows and cards. */
+.cc .panel { padding: 10px 14px; border-radius: 14px; }
+.cc.narrow .panel { padding: 10px 10px; }
+.cc .desk { padding: 4px 12px; border-radius: 12px; }
+.cc row > box.header { min-height: 36px; margin-left: 12px; margin-right: 10px; }
+.cc row > box.header > box.title { margin-top: 4px; margin-bottom: 4px; border-spacing: 1px; }
+.cc row > box.header > box.title > .title { font-size: 13.5px; line-height: 17px; }
+.cc row > box.header > box.title > .subtitle { font-size: 11.5px; line-height: 14px; }
+.cc preferencesgroup > box { border-spacing: 4px; }
+.cc preferencesgroup > box > box.header:not(.single-line) { margin-bottom: 0; }
+.cc preferencesgroup > box > box.single-line { min-height: 0; }
+.cc preferencesgroup label.heading { font-size: 10px; letter-spacing: 1.7px; font-weight: 800; color: alpha(white, 0.36); }
+.cc .knob-name { font-size: 9px; letter-spacing: 0.6px; }
+.cc .knob-val { font-size: 13px; }
+.cc .big-num { font-size: 24px; }
+.cc .chips button { padding: 4px 11px; font-size: 12.5px; }
+.cc .seg button { padding: 3px 12px; }
+.cc .pill-btn { padding: 5px 12px; }
+.cc .cv-tile { padding: 8px; }
+.spk-btn { border-radius: 10px; padding: 6px 8px; font-size: 12.5px; font-weight: 600; background: alpha(white, 0.05); border: 1px solid alpha(white, 0.08); }
+.spk-btn:hover { background: alpha(white, 0.1); }
+.fixes { padding: 6px 10px; }
+.fixes button { padding: 5px 8px; font-size: 12.5px; }
+.lf-row { font-size: 13px; }
+.cc .in-row { padding: 2px 10px 2px 12px; min-height: 36px; }
+.cc .in-row .lvl-name { font-size: 13.5px; color: white; }
+.cc .lf-card { padding: 4px; border-radius: 8px; }
+.cc .lf-n { font-size: 11px; font-weight: 600; }
+.cc .lf-h { margin-top: 6px; }
 .cc preferencesgroup .header label.description { color: alpha(white, 0.55); }
 .cc list.boxed-list, .cc .boxed-list { background: alpha(white, 0.035); border: 1px solid alpha(white, 0.07); box-shadow: none; border-radius: 12px; }
 .cc row:hover { background: alpha(white, 0.04); }
@@ -127,10 +158,12 @@ progressbar.pink progress { background: #ff416c; }
 .side .panel { background: alpha(white, 0.03); }
 .side switch:checked { background: #e3262f; }
 .desk { border-radius: 14px; padding: 14px 10px; background: alpha(black, 0.25); border: 1px solid alpha(white, 0.07); }
-.strip-val { font-weight: 700; font-size: 11px; font-feature-settings: "tnum"; }
-.strip-name { font-size: 10.5px; color: alpha(white, 0.6); }
-.strip scale trough { min-width: 6px; }
-.strip scale highlight { background: linear-gradient(to top, #c8102e, #ff416c); }
+.lvl { min-height: 30px; }
+.lvl-name { font-size: 12.5px; color: alpha(white, 0.82); }
+.lvl-val { font-size: 12px; font-weight: 700; font-feature-settings: "tnum"; color: alpha(white, 0.7); }
+.lvl scale { padding-top: 4px; padding-bottom: 4px; }
+.lvl scale trough { min-height: 5px; }
+.lvl scale highlight { background: linear-gradient(to right, #c8102e, #ff416c); }
 .cv-tile { border-radius: 14px; padding: 10px 8px; background: alpha(white, 0.04); border: 1px solid alpha(white, 0.07); }
 .tile-icon { color: alpha(white, 0.4); }
 .menu-box { padding: 4px; }

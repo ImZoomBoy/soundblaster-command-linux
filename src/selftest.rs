@@ -113,7 +113,7 @@ fn steps() -> Vec<Step> {
         check(!u.scout_box.is_visible() && !s(u).scout, "Scout should hide for music")
     });
     step!("Output only changes after asking", |u: &Ui| {
-        u.out_switch.emit_clicked();
+        u.stage.hp.emit_clicked();
         let d = u.win.visible_dialog();
         check(d.is_some() && !s(u).headphones(), "should ask first")?;
         d.unwrap().force_close();
@@ -184,9 +184,10 @@ fn steps() -> Vec<Step> {
             }
             check(model::effective_eq(&s(u)).0 == curve.to_vec(), format!("{n}: card curve"))?;
         }
-        u.eq_on.set_active(false);
-        check(!model::effective_eq(&s(u)).1, "EQ off")?;
-        u.eq_on.set_active(true);
+        // (no "Equaliser on" switch: Flat is the EQ off)
+        let flat = u.eq_names.borrow().iter().position(|n| n == "Flat").ok_or("no Flat preset")?;
+        u.eq_preset.set_selected(flat as u32);
+        check(model::effective_eq(&s(u)).0.iter().all(|v| *v == 0) || s(u).sbx_active(), "Flat is flat")?;
         u.profile_btns["Revert"].emit_clicked();
         Ok(())
     });
@@ -254,13 +255,17 @@ fn steps() -> Vec<Step> {
         u.cfg.set_selected(4);
         u.spk_type.set_selected(SPEAKER_TYPES.iter().position(|t| *t == "dtt2200").unwrap() as u32);
         check(s(u).crossover == model::DTT2200_CROSSOVER && s(u).bass_redirect, "DTT2200")?;
+        // The brand decides full range, bass redirection and the crossover: they aren't asked.
+        check(!u.fr_front.is_visible() && !u.bass_redir.is_visible() && !u.xover_row.is_visible() && u.spk_info.is_visible(),
+              "the DTT2200's own settings are hidden")?;
         u.xover.set_value(100.0);
         check(s(u).crossover == 100 && s(u).speaker_type == "custom", "crossover by hand makes it custom")?;
+        check(u.fr_front.is_visible() && u.xover_row.is_visible() && !u.spk_info.is_visible(), "set by hand shows every switch")?;
         u.spk_type.set_selected(SPEAKER_TYPES.iter().position(|t| *t == "dtt2200").unwrap() as u32);
         u.hp_gain.set_selected(1);
         check(s(u).hp_600ohm, "high gain")?;
         u.hp_gain.set_selected(0);
-        u.test_rows.borrow()[0].2.emit_clicked();
+        u.test_rows.borrow()[0].1.emit_clicked();
         u.test_all.emit_clicked();
         Ok(())
     });
@@ -325,11 +330,56 @@ fn steps() -> Vec<Step> {
         u.auto_combo.set_selected(1);
         u.on_detected(yt(), true);
         check(s(u).activity == "music", "suggest must not switch")?;
-        gtk::prelude::WidgetExt::activate_action(&u.win, "win.use-activity", Some(&"movie".to_variant())).map_err(|e| e.to_string())?;
-        check(s(u).activity == "movie", "Switch button")?;
+        gtk::prelude::WidgetExt::activate_action(&u.win, "win.use-kind", Some(&"video".to_variant())).map_err(|e| e.to_string())?;
+        check(s(u).activity == "movie" && s(u).kind == "video", "Switch button")?;
         u.auto_combo.set_selected(0);
         u.set_activity("music");
         u.on_detected(None, true);
+        Ok(())
+    });
+    step!("Each kind of content keeps its own sound", |u: &Ui| {
+        use crate::detect::Detection;
+        u.auto_combo.set_selected(0);
+        // Films and TV share the film profiles but keep their own picks.
+        u.apply_kind("film");
+        u.set_style("Night");
+        u.page_pick("tone:-1");
+        u.apply_kind("tv");
+        u.set_style("Cinema");
+        u.page_pick("tone:0");
+        u.apply_kind("film");
+        check(s(u).cur_profile() == "Night" && s(u).tone == -1, format!("films: {} {}", s(u).cur_profile(), s(u).tone))?;
+        check(u.kind_dd.selected() as usize == model::KINDS.iter().position(|k| k.0 == "film").unwrap(), "the Sound tab shows Films")?;
+        // Something playing switches to its kind's sound; the Sound tab can show
+        // another kind while ☰ is open, and closing ☰ goes back.
+        let tv = || Some(Detection { activity: "movie", source: "Kodi".into(), title: "Quiet Harbour S02E03".into(), ..Default::default() });
+        u.on_detected(tv(), false);
+        u.on_detected(tv(), true);
+        check(s(u).kind == "tv" && s(u).cur_profile() == "Cinema", format!("TV playing: {} {}", s(u).kind, s(u).cur_profile()))?;
+        u.show_page("sound");
+        u.kind_dd.set_selected(model::KINDS.iter().position(|k| k.0 == "film").unwrap() as u32);
+        check(s(u).kind == "film" && s(u).cur_profile() == "Night", "picking Films in the Sound tab plays its sound")?;
+        u.close_panel();
+        check(s(u).kind == "tv" && s(u).cur_profile() == "Cinema", "closing ☰ goes back to what's playing")?;
+        u.on_detected(None, true);
+        *u.playing_kind.borrow_mut() = String::new();
+        u.apply_kind("music");
+        Ok(())
+    });
+    step!("Each app its own sound: the switch, and what an app of another kind gets", |u: &Ui| {
+        u.per_app_switch.set_active(false);
+        check(!s(u).per_app, "off")?;
+        u.per_app_switch.set_active(true);
+        check(s(u).per_app, "on")?;
+        // Music beside a game: its own EQ added in its stream, its own stereo.
+        u.apply_kind("music");
+        u.apply_eq("Rock");
+        u.s.borrow_mut().remember_kind();
+        u.apply_kind("game");
+        let (eq, _) = model::stream_sound(&s(u), "music");
+        check(eq.iter().any(|g| *g != 0), "music beside a game gets its own EQ")?;
+        check(model::stream_sound(&s(u), "game").0.iter().all(|g| *g == 0), "the game sets the card")?;
+        u.apply_kind("music");
         Ok(())
     });
     step!("Per-game memory", |u: &Ui| {
@@ -446,11 +496,11 @@ fn steps() -> Vec<Step> {
         u.s.borrow_mut().layout_defaults.insert("music".into(), "rows".into());
         check(s(u).layout_for("music") == "rows" && s(u).layout_for("game") == "slimbig", "a saved default for music only")?;
         u.s.borrow_mut().layout_defaults.clear();
-        u.s.borrow_mut().theme = "compact".into();
+        u.s.borrow_mut().compact_always = true;
         u.update_stage();
         rc().on_window_size(u.win.width(), u.win.height());
-        check(u.layout_now().1 && u.views.visible_child_name().as_deref() == Some("remote"), "the Compact theme shows the Remote")?;
-        u.s.borrow_mut().theme = "oys".into();
+        check(u.layout_now().1 && u.views.visible_child_name().as_deref() == Some("remote"), "the compact view in big windows too")?;
+        u.s.borrow_mut().compact_always = false;
         u.update_stage();
         rc().on_window_size(u.win.width(), u.win.height());
         u.show_page("look");
@@ -495,6 +545,29 @@ fn steps() -> Vec<Step> {
         u.sbx_btn.set_active(true);
         sizes.push(size(u));
         check(sizes.iter().all(|s| *s == first), format!("the control centre keeps its size {first:?} {sizes:?}"))?;
+        // Every tab fits the panel's width (nothing cut off at the right), the tabs too:
+        // in a small window, the default window and a wide one.
+        for (ww, wh) in [(440, 720), (1240, 800), (1400, 900), (w, h)] {
+            rc().on_window_size(ww, wh);
+            let (pw, _) = u.side_box_size();
+            let wide: Vec<_> = u.panel_fit().into_iter().filter(|(_, need, _)| *need > pw - 4).collect();
+            let tb = u.cc_tabs.first().and_then(|(_, b)| b.parent());
+            let tabs = tb.as_ref().map(|p| p.measure(gtk::Orientation::Horizontal, -1).1).unwrap_or(0);
+            let room = pw - 2 - tb.as_ref().map(|p| p.margin_start() + p.margin_end()).unwrap_or(0);
+            check(wide.is_empty() && tabs <= room, format!("in a {ww} px window every tab fits {pw} px: too wide {wide:?}, tabs {tabs} of {room}"))?;
+            // ... and its height: no tab needs scrolling (the Look and feel page is built when shown).
+            u.show_page("look");
+            let all = u.panel_heights();
+            eprintln!("INFO control centre at {ww}x{wh}: {}", all.iter().map(|(n, need, room)| format!("{n} {need}/{room}")).collect::<Vec<_>>().join(", "));
+            let mut tall: Vec<_> = all.into_iter().filter(|(_, need, room)| need > room).collect();
+            // Games have the most profile chips (two lines of them on Sound).
+            pick(u, "game");
+            tall.extend(u.panel_heights().into_iter().filter(|(n, need, room)| n == "sound" && need > room).map(|(n, a, b)| (format!("{n} (game)"), a, b)));
+            pick(u, "music");
+            check(tall.is_empty(), format!("in a {ww}x{wh} window every tab fits without scrolling: too tall {tall:?}"))?;
+        }
+        rc().on_window_size(w, h);
+        u.show_page("sound");
         u.close_panel();
         check(!u.panel_open(), "Done closes it")?;
         // Over your shoulder, mini instead of the Remote, when picked.
@@ -511,17 +584,17 @@ fn steps() -> Vec<Step> {
         check(u.views.visible_child_name().as_deref() == Some("page"), "and back")
     });
     step!("The window keeps its size: every profile, Pure, stereo option, volume and a long title", |u: &Ui| {
-        // The right-hand column takes the width it asks for (the room gets the
-        // rest), so any card in it whose width follows its text moves the whole
-        // layout. Its top card holds the changing sentence and the volume.
+        // The cards sit in the control centre, whose size comes from the window
+        // only: what must stay put is the window's size and the panel's.
         let width = |u: &Ui| {
-            let (right, card) = u.layout_widths();
+            let (pw, ph) = u.side_box_size();
             let win = u.win.measure(gtk::Orientation::Horizontal, -1).1;
             let (hmin, _, _, _) = u.win.measure(gtk::Orientation::Vertical, 1240);
             if std::env::var_os("SBCOMMAND_WIDTHS").is_some() {
-                println!("WIDTH window {win} right column {right} top card {card} height {hmin} | {} {}", s(u).cur_profile(), s(u).stereo_on);
+                println!("WIDTH window {win} panel {pw}x{ph} height {hmin} | {} {}", s(u).cur_profile(), s(u).stereo_on);
             }
-            ((win * 10_000 + right) * 10_000 + card) * 10_000 + hmin
+            // (wrapping is fine: only equality matters)
+            win.wrapping_mul(1_000_003).wrapping_add(pw.wrapping_mul(10_007)).wrapping_add(ph.wrapping_mul(101)).wrapping_add(hmin)
         };
         u.on_now_playing(Some(song()));
         let mut seen: Vec<(String, i32)> = vec![("start".into(), width(u))];

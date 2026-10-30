@@ -77,6 +77,8 @@ pub struct Ui {
     strip_on: Cell<bool>,
     /// The control centre (☰): the panel, its dimmed backdrop, its tabs and head.
     side_box: gtk::Box,
+    /// Narrow (a small window): the pages rearranged to fit (see narrow_panel).
+    pub panel_narrow: Cell<bool>,
     pub cc_rev: gtk::Revealer,
     cc_scrim: gtk::Button,
     pub cc_tabs: Vec<(&'static str, gtk::ToggleButton)>,
@@ -124,8 +126,11 @@ pub struct Ui {
 
     // ---- output card
     pub vol_adj: gtk::Adjustment,
-    pub vol_label: gtk::Label,
     pub out_label: gtk::Label,
+    /// Which kind of content's sound the Sound tab shows (and you hear).
+    pub kind_dd: gtk::DropDown,
+    /// The kind of content playing now (the Sound tab can show another while open).
+    pub playing_kind: RefCell<String>,
     pub mute: gtk::ToggleButton,
     vol_loading: Cell<bool>,
     pub sbx_btn: gtk::ToggleButton,
@@ -133,7 +138,6 @@ pub struct Ui {
     pub stereo_btns: Vec<(&'static str, gtk::ToggleButton)>,
     pub stereo_row: gtk::Box,
     pub mode_desc: gtk::Label,
-    pub out_switch: gtk::Button,
 
     // ---- SBX profile card
     chips: gtk::FlowBox,
@@ -146,7 +150,6 @@ pub struct Ui {
     pub fx: Vec<FxRow>,
 
     // ---- equaliser card
-    pub eq_on: gtk::Switch,
     pub eq_preset: gtk::DropDown,
     pub eq_names: RefCell<Vec<String>>,
     pub eq_btns: HashMap<&'static str, gtk::Button>,
@@ -160,7 +163,6 @@ pub struct Ui {
     pub mix_rows: RefCell<Vec<(String, gtk::Box, gtk::Scale)>>,
     mix_meters: RefCell<Vec<(usize, gtk::DrawingArea)>>,
     pub boost: gtk::Scale,
-    boost_label: gtk::Label,
     pub mic_level: gtk::Scale,
     pub wuh_level: gtk::Scale,
 
@@ -183,13 +185,15 @@ pub struct Ui {
     pub spk_type: adw::ComboRow,
     pub fr_front: adw::SwitchRow,
     pub fr_rear: adw::SwitchRow,
+    /// What the brand (or size) picked sets, in place of the switches it decides.
+    pub spk_info: adw::ActionRow,
     pub bass_redir: adw::SwitchRow,
     pub xover: gtk::Scale,
-    xover_row: adw::ActionRow,
+    pub xover_row: adw::ActionRow,
     pub hp_gain: adw::ComboRow,
-    test_group: adw::PreferencesGroup,
+    test_grid: gtk::Grid,
     test_layout: RefCell<String>,
-    pub test_rows: RefCell<Vec<(String, adw::ActionRow, gtk::Button)>>,
+    pub test_rows: RefCell<Vec<(String, gtk::Button)>>,
     pub test_all: gtk::Button,
 
     // ---- Settings
@@ -197,6 +201,7 @@ pub struct Ui {
     pub remember_switch: adw::SwitchRow,
     pub genre_switch: adw::SwitchRow,
     pub tray_switch: adw::SwitchRow,
+    pub per_app_switch: adw::SwitchRow,
     pub refresh_btn: gtk::Button,
     pub reset_btn: gtk::Button,
     pub defaults_btn: gtk::Button,
@@ -317,44 +322,45 @@ fn set_strings(dd: &gtk::DropDown, cache: &RefCell<Vec<String>>, names: Vec<Stri
     }
 }
 
-/// A vertical fader with its value, an optional live meter and its name.
-fn strip(name: &str, lo: f64, hi: f64, step: f64, fmt: fn(f64) -> String, meter: Option<&gtk::DrawingArea>) -> (gtk::Box, gtk::Scale) {
-    let col = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).css_classes(["strip"]).build();
-    let val = label("", &["strip-val"]);
-    val.set_xalign(0.5);
-    let sc = gtk::Scale::with_range(gtk::Orientation::Vertical, lo, hi, step);
-    sc.set_inverted(true);
-    sc.set_size_request(-1, 200);
+/// A level as one line: its name, a slider across (its live meter under it)
+/// and the value. The control centre's pages are rows like this so each fits
+/// without scrolling.
+fn level_row(name: &str, lo: f64, hi: f64, step: f64, fmt: fn(f64) -> String, meter: Option<&gtk::DrawingArea>) -> (gtk::Box, gtk::Scale) {
+    let row = gtk::Box::builder().spacing(10).css_classes(["lvl"]).build();
+    let nm = label(name, &["lvl-name"]);
+    nm.set_width_request(98);
+    let sc = gtk::Scale::with_range(gtk::Orientation::Horizontal, lo, hi, step);
+    sc.set_hexpand(true);
     sc.set_draw_value(false);
-    if lo < 0.0 && hi >= 0.0 {
-        sc.add_mark(0.0, gtk::PositionType::Right, None);
+    if lo < 0.0 && hi > 0.0 {
+        sc.add_mark(0.0, gtk::PositionType::Bottom, None);
     }
+    let mid = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).valign(gtk::Align::Center).build();
+    mid.append(&sc);
+    if let Some(m) = meter {
+        mid.append(m);
+    }
+    let val = label("", &["lvl-val"]);
+    val.set_width_chars(6);
+    val.set_xalign(1.0);
     {
         let val = val.clone();
         let upd = move |s: &gtk::Scale| val.set_label(&fmt(s.value()));
         upd(&sc);
         sc.connect_value_changed(upd);
     }
-    let row = gtk::Box::builder().spacing(4).halign(gtk::Align::Center).build();
-    row.append(&sc);
-    if let Some(m) = meter {
-        row.append(m);
-    }
-    let nm = label(name, &["strip-name"]);
-    nm.set_xalign(0.5);
-    nm.set_wrap(true);
-    nm.set_justify(gtk::Justification::Center);
-    col.append(&val);
-    col.append(&row);
-    col.append(&nm);
-    (col, sc)
+    row.append(&nm);
+    row.append(&mid);
+    row.append(&val);
+    (row, sc)
 }
 
+/// A speaker's live meter: a thin bar under its slider.
 fn meter_area(idx: usize) -> gtk::DrawingArea {
-    let da = gtk::DrawingArea::builder().content_width(6).content_height(200).build();
+    let da = gtk::DrawingArea::builder().content_height(3).hexpand(true).margin_start(10).margin_end(10).build();
     da.set_draw_func(move |_, cr, w, h| {
         let lv = UI.with(|c| c.borrow().as_ref().and_then(|w| w.upgrade()).map(|u| u.levels.get()[idx]).unwrap_or(0.0));
-        dash::draw_vmeter(cr, w as f64, h as f64, lv as f64);
+        dash::draw_hmeter(cr, w as f64, h as f64, lv as f64);
     });
     da
 }
@@ -447,51 +453,40 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     room_ov.add_overlay(&capsule);
 
     // ================================================================ right column: output card
+    // The volume, mute and headphones are the dock's (always on screen), so the
+    // card holds what plays (speakers or headphones), SBX / Pure and the stereo.
     let vol_adj = gtk::Adjustment::new(50.0, 0.0, 100.0, 1.0, 10.0, 0.0);
-    let vol_knob = dash::knob(&vol_adj, None, 74, "Volume: turn, scroll or use the arrow keys");
     let out_label = caps("Speakers");
-    let vol_label = label("", &["big-num"]);
-    vol_label.set_width_chars(4);
-    vol_label.set_xalign(0.0);
+    out_label.set_hexpand(true);
+    out_label.set_valign(gtk::Align::Center);
+    // Each kind of content keeps its own sound: this shows (and plays) one.
+    let kind_dd = gtk::DropDown::from_strings(&model::KINDS.map(|k| k.1));
+    kind_dd.set_valign(gtk::Align::Center);
+    kind_dd.set_tooltip_text(Some("Each kind of content keeps its own sound. Pick one to hear and change it; \
+        closing ☰ goes back to what's playing."));
     let mute = gtk::ToggleButton::builder().icon_name("audio-volume-high-symbolic").tooltip_text("Mute")
-        .css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
-    let vrow = gtk::Box::builder().spacing(6).build();
-    vrow.append(&vol_label);
-    vrow.append(&mute);
-    let vtext = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).hexpand(true).build();
-    vtext.append(&out_label);
-    vtext.append(&vrow);
+        .css_classes(["flat-t", "mute"]).valign(gtk::Align::Center).build();
     let (mode_seg, mode_btns) = segmented(&["SBX", "Pure"], true);
-    let segs = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).valign(gtk::Align::Center).build();
-    segs.append(&mode_seg);
-    let top = gtk::Box::builder().spacing(12).build();
-    top.append(&vol_knob);
-    top.append(&vtext);
-    top.append(&segs);
+    let top = gtk::Box::builder().spacing(10).build();
+    top.append(&kind_dd);
+    top.append(&out_label);
+    top.append(&mode_seg);
     let (stereo_seg, sbtns) = segmented(&model::STEREO_ON.map(|x| x.1), false);
     for (b, (_, _, about)) in sbtns.iter().zip(model::STEREO_ON) {
         b.set_tooltip_text(Some(about));
     }
-    let stereo_row = gtk::Box::builder().spacing(10).margin_top(12).build();
+    let stereo_row = gtk::Box::builder().spacing(10).build();
     let sl = caps("Stereo plays on");
     sl.set_hexpand(true);
     stereo_row.append(&sl);
     stereo_row.append(&stereo_seg);
+    // What SBX/Pure and the speakers mean right now (the control centre's head
+    // line says it in short, so it isn't shown; the self-test reads it).
     let mode_desc = label("", &["desc"]);
-    mode_desc.set_wrap(true);
-    // A fixed width: a wrapped label otherwise asks for its longest line, which
-    // changes with the profile name and shifts the whole layout.
-    mode_desc.set_max_width_chars(44);
-    mode_desc.set_width_chars(44);
-    mode_desc.set_hexpand(true);
-    let out_switch = gtk::Button::builder().css_classes(["pill-btn"]).valign(gtk::Align::Center).build();
-    let bottom = gtk::Box::builder().spacing(10).margin_top(10).build();
-    bottom.append(&mode_desc);
-    bottom.append(&out_switch);
+    stereo_row.set_margin_top(10);
     let out_card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["panel"]).build();
     out_card.append(&top);
     out_card.append(&stereo_row);
-    out_card.append(&bottom);
 
     // ================================================================ SBX profile card
     let chips = gtk::FlowBox::builder().selection_mode(gtk::SelectionMode::None).column_spacing(6).row_spacing(6)
@@ -502,7 +497,7 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     scout_box.append(&label("Scout", &["dim"]));
     scout_box.append(&scout_sw);
     let mut fx = Vec::new();
-    let knobs = gtk::Box::builder().homogeneous(true).spacing(4).margin_top(12).build();
+    let knobs = gtk::Box::builder().homogeneous(true).spacing(2).margin_top(4).build();
     let xover_sc = hscale(50.0, 300.0, 10.0, fmt_hz);
     let sv_mode = gtk::DropDown::from_strings(&SVM_MODES);
     for (key, title, tip) in [
@@ -514,17 +509,20 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     ] {
         let level = gtk::Adjustment::new(50.0, 0.0, 100.0, 1.0, 10.0, 0.0);
         let on = dash::power_button(&format!("{title} on/off"));
-        let knob = dash::knob(&level, Some(&on), 78, tip);
-        let head = gtk::Box::builder().spacing(6).halign(gtk::Align::Center).build();
-        head.append(&label(&title.to_uppercase(), &["knob-name"]));
-        head.append(&on);
+        // The name, the knob, then its power light beside the value (five fit in a row).
+        let knob = dash::knob(&level, Some(&on), 50, tip);
+        let name = label(&title.to_uppercase(), &["knob-name"]);
+        name.set_xalign(0.5);
         let value = label("", &["knob-val"]);
         value.set_xalign(0.5);
         value.set_width_chars(3);
+        let foot = gtk::Box::builder().spacing(4).halign(gtk::Align::Center).build();
+        foot.append(&on);
+        foot.append(&value);
         let col = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
-        col.append(&head);
+        col.append(&name);
         col.append(&knob);
-        col.append(&value);
+        col.append(&foot);
         knobs.append(&col);
         let (xover, mode) = match key {
             "bass" => (Some(xover_sc.clone()), None),
@@ -534,31 +532,26 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
         fx.push(FxRow { key, col, on, level, knob, value, xover, mode });
     }
     let pm_extra = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_start(8).margin_end(8).margin_top(6).margin_bottom(6).build();
-    pm_extra.append(&label("Bass crossover", &["caps-small"]));
+    // (how high the SBX Bass boost reaches, through the EQ; not the speakers' crossover)
+    pm_extra.append(&label("Bass boost up to", &["caps-small"]));
     pm_extra.append(&xover_sc);
     pm_extra.append(&label("Smart Volume mode", &["caps-small"]));
     pm_extra.append(&sv_mode);
     let (pmenu, profile_btns) = menu(&["New…", "Rename…", "Revert", "Delete", "Import…", "Export…"],
-        Some(pm_extra.upcast_ref()), "Profile: new, rename, revert, delete, import, export; Bass crossover, Smart Volume mode");
+        Some(pm_extra.upcast_ref()), "Profile: new, rename, revert, delete, import, export; how high Bass reaches, Smart Volume mode");
     let phead = gtk::Box::builder().spacing(8).build();
     let pl = caps("SBX profile");
     pl.set_hexpand(true);
     phead.append(&pl);
     phead.append(&scout_box);
     phead.append(&pmenu);
-    let profile_card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).css_classes(["panel"]).build();
+    let profile_card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).css_classes(["panel"]).build();
     profile_card.append(&phead);
     profile_card.append(&chips);
     profile_card.append(&knobs);
 
     // ================================================================ equaliser card
-    let eq_on = gtk::Switch::builder().valign(gtk::Align::Center).build();
-    let eq_on_row = gtk::Box::builder().spacing(10).margin_start(8).margin_end(8).margin_top(6).margin_bottom(6).build();
-    let eol = label("Equaliser on", &[]);
-    eol.set_hexpand(true);
-    eq_on_row.append(&eol);
-    eq_on_row.append(&eq_on);
-    let (emenu, eq_btns) = menu(&["New…", "Rename…", "Revert", "Delete", "Import…", "Export…"], Some(eq_on_row.upcast_ref()),
+    let (emenu, eq_btns) = menu(&["New…", "Rename…", "Revert", "Delete", "Import…", "Export…"], None,
         "Preset: new, rename, revert, delete, import, export");
     let eq_preset = gtk::DropDown::from_strings(&[]);
     eq_preset.set_valign(gtk::Align::Center);
@@ -570,7 +563,8 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     ehead.append(&emenu);
     let eq_bands: Vec<gtk::Scale> = BAND_LABELS.iter().map(|_| gtk::Scale::with_range(gtk::Orientation::Vertical, -12.0, 12.0, 1.0)).collect();
     let eq_view = dash::eq_curve(&eq_bands);
-    eq_view.area.set_content_height(170);
+    // As tall as the panel leaves room for (at least 90 px).
+    eq_view.area.set_content_height(90);
     eq_view.area.set_vexpand(true);
     let eq_card = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).css_classes(["panel"]).vexpand(true).build();
     eq_card.append(&ehead);
@@ -578,7 +572,7 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
 
     // The detailed controls (output, SBX profile and its effects, the
     // equaliser) live in the Sound panel; the page shows what's playing.
-    let right = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).build();
+    let right = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
     right.append(&out_card);
     right.append(&profile_card);
     right.append(&eq_card);
@@ -594,29 +588,21 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
         views.add_named(&h, Some(name));
     }
     let body = views.clone();
-    let look_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).build();
+    let look_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
 
     // ================================================================ side panels
-    // Mixer
-    let mix_box = gtk::Box::builder().spacing(6).homogeneous(true).build();
-    let (boost_col, boost) = strip("Speaker boost", 0.0, 9.0, 1.0, |v| format!("+{}", v.round() as i64), None);
-    let (mic_col, mic_level) = strip("Microphone", -40.0, 9.0, 1.0, fmt_db_int, None);
-    let (wuh_col, wuh_level) = strip("What U Hear", -40.0, 9.0, 1.0, fmt_db_int, None);
-    let desk = gtk::Box::builder().spacing(10).css_classes(["desk"]).build();
+    // Mixer: each speaker's level as a row with its meter, the boost, then recording.
+    let mix_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    let (boost_row, boost) = level_row("Speaker boost", 0.0, 9.0, 1.0, |v| format!("+{} dB", v.round() as i64), None);
+    let (mic_row, mic_level) = level_row("Microphone level", -40.0, 9.0, 1.0, fmt_db_int, None);
+    let (wuh_row, wuh_level) = level_row("What U Hear level", -40.0, 9.0, 1.0, fmt_db_int, None);
+    let desk = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["desk"]).build();
     desk.append(&mix_box);
-    desk.append(&gtk::Separator::new(gtk::Orientation::Vertical));
-    desk.append(&boost_col);
-    let boost_label = label("", &["dim", "small"]);
-    boost_label.set_wrap(true);
-    let rec = gtk::Box::builder().spacing(10).css_classes(["desk"]).homogeneous(true).build();
-    rec.append(&mic_col);
-    rec.append(&wuh_col);
-    let mix_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
+    desk.append(&gtk::Separator::builder().orientation(gtk::Orientation::Horizontal).margin_top(4).margin_bottom(4).build());
+    desk.append(&boost_row);
+    let mix_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
     mix_page.append(&caps("Speakers"));
     mix_page.append(&desk);
-    mix_page.append(&boost_label);
-    mix_page.append(&caps("Recording"));
-    mix_page.append(&rec);
 
     // CrystalVoice
     let cv_on = switch("CrystalVoice", "Creative's microphone effects");
@@ -641,11 +627,11 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     let nr_val = label("", &["knob-val"]);
     let sv_val = label("", &["knob-val"]);
     let fo_val = label("", &["knob-val"]);
-    let nr_icon = gtk::Image::builder().icon_name("audio-input-microphone-symbolic").pixel_size(34).height_request(74).css_classes(["tile-icon"]).build();
+    let nr_icon = gtk::Image::builder().icon_name("audio-input-microphone-symbolic").pixel_size(26).height_request(50).css_classes(["tile-icon"]).build();
     let cv_tiles = gtk::Box::builder().spacing(8).homogeneous(true).build();
     cv_tiles.append(&cv_tile("Noise red.", &nr, nr_icon.upcast_ref(), &nr_val));
-    cv_tiles.append(&cv_tile("Smart Vol", &msvm, dash::knob(&msvm_level, Some(&msvm), 70, "Smart Volume level").upcast_ref(), &sv_val));
-    cv_tiles.append(&cv_tile("Focus", &focus, dash::knob(&focus_angle, Some(&focus), 70, "How wide the microphone listens").upcast_ref(), &fo_val));
+    cv_tiles.append(&cv_tile("Smart Vol", &msvm, dash::knob(&msvm_level, Some(&msvm), 50, "Smart Volume level").upcast_ref(), &sv_val));
+    cv_tiles.append(&cv_tile("Focus", &focus, dash::knob(&focus_angle, Some(&focus), 50, "How wide the microphone listens").upcast_ref(), &fo_val));
     let morph = gtk::DropDown::from_strings(&VOICE_MORPHS);
     morph.set_valign(gtk::Align::Center);
     let morph_row = adw::ActionRow::builder().title("VoiceFX").subtitle("Changes how your voice sounds").build();
@@ -657,105 +643,168 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     vt.add_suffix(&voice_test);
     let g_cv = group("", None);
     g_cv.add(&cv_on);
-    let g_mic = group("Microphone", None);
-    for w in [morph_row.upcast_ref::<gtk::Widget>(), mic_boost.upcast_ref(), wuh.upcast_ref(), vt.upcast_ref()] {
+    // The recording levels sit by their own switches (they were in the Mixer).
+    let lrow = |b: &gtk::Box| {
+        b.add_css_class("in-row");
+        gtk::ListBoxRow::builder().child(b).activatable(false).selectable(false).build()
+    };
+    let (mic_lrow, wuh_lrow) = (lrow(&mic_row), lrow(&wuh_row));
+    let g_mic = group("MICROPHONE", None);
+    for w in [mic_lrow.upcast_ref::<gtk::Widget>(), mic_boost.upcast_ref(), morph_row.upcast_ref(), wuh.upcast_ref(), wuh_lrow.upcast_ref(), vt.upcast_ref()] {
         g_mic.add(w);
     }
-    let cv_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).build();
+    let cv_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
     cv_page.append(&g_cv);
     cv_page.append(&cv_tiles);
     cv_page.append(&g_mic);
 
     // Speaker setup
-    let cfg = combo("Speakers", &SPEAKER_CONFIG_LABELS);
-    let spk_type = combo("Speaker type", &SPEAKER_TYPE_LABELS);
+    let cfg = combo("Channels", &SPEAKER_CONFIG_LABELS);
+    // The brand and model shows under the title, where it has the row's width.
+    let spk_type = combo("Brand and model", &SPEAKER_TYPE_LABELS);
+    spk_type.set_use_subtitle(true);
+    spk_type.set_tooltip_text(Some("Sets the subwoofer, crossover and full-range speakers for them"));
     let fr_front = switch("Full-range front speakers", "");
     let fr_rear = switch("Full-range rear speakers", "");
+    let spk_info = adw::ActionRow::builder().title("").activatable(false).css_classes(["spk-info"]).build();
+    spk_info.set_use_markup(false);
     let bass_redir = switch("Bass redirection", "Sends low frequencies to the subwoofer");
     let xover = hscale(50.0, 200.0, 10.0, fmt_hz);
-    let xover_row = adw::ActionRow::builder().title("Crossover").subtitle("Bass below this goes to the subwoofer").build();
+    xover.set_size_request(130, -1);
+    let xover_row = adw::ActionRow::builder().title("Crossover").subtitle("Bass below it goes to the sub").build();
     xover_row.add_suffix(&xover);
     let hp_gain = combo("Headphone gain", &HP_GAINS);
-    let g_spk = group("Speakers", None);
-    for w in [cfg.upcast_ref::<gtk::Widget>(), spk_type.upcast_ref(), fr_front.upcast_ref(), fr_rear.upcast_ref(),
+    let g_spk = group("YOUR SPEAKERS", None);
+    for w in [cfg.upcast_ref::<gtk::Widget>(), spk_type.upcast_ref(), spk_info.upcast_ref(), fr_front.upcast_ref(), fr_rear.upcast_ref(),
               bass_redir.upcast_ref(), xover_row.upcast_ref(), hp_gain.upcast_ref()] {
         g_spk.add(w);
     }
+    // The test: one button per speaker, placed as they stand round you.
     let test_all = gtk::Button::builder().label("Test all").tooltip_text("Plays a short sound on each speaker in turn")
-        .css_classes(["suggested-action"]).valign(gtk::Align::Center).build();
-    let test_group = group("Test", Some("Plays a short sound on each speaker. You can also click a speaker in the room."));
-    test_group.set_header_suffix(Some(&test_all));
-    let setup_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).build();
+        .css_classes(["pill-btn"]).valign(gtk::Align::Center).build();
+    let thead = gtk::Box::builder().spacing(8).build();
+    let tl = caps("Test");
+    tl.set_hexpand(true);
+    tl.set_tooltip_text(Some("Plays a short sound on one speaker. You can also click a speaker in the room."));
+    thead.append(&tl);
+    thead.append(&test_all);
+    let test_grid = gtk::Grid::builder().column_spacing(6).row_spacing(6).column_homogeneous(true).build();
+    let test_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).css_classes(["panel"]).build();
+    test_box.append(&thead);
+    test_box.append(&test_grid);
+    let setup_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
     setup_page.append(&g_spk);
-    setup_page.append(&test_group);
+    setup_page.append(&test_box);
 
-    // Settings
+    // Settings: one line per setting.
     let auto_combo = combo("When something starts playing", &model::AUTO_MODE_LABELS);
-    let remember_switch = switch("Remember settings per game and app", "Your last SBX profile and EQ come back when it plays again");
-    let genre_switch = switch("Match the EQ to the song's genre online", "MusicBrainz, artist name only, once per artist");
-    let tray_switch = switch("Show in the system tray", "Switch sound modes without opening this window");
-    let g_auto = group("Automatic", None);
-    for w in [auto_combo.upcast_ref::<gtk::Widget>(), remember_switch.upcast_ref(), genre_switch.upcast_ref(), tray_switch.upcast_ref()] {
+    let remember_switch = switch("Remember settings per game and app", "Your last SBX profile and EQ come back");
+    let genre_switch = switch("Match the EQ to the song's genre", "MusicBrainz, the artist's name only");
+    let tray_switch = switch("Show in the system tray", "Switch the sound without opening this window");
+    let per_app_switch = switch("Each app its own sound", "Music beside a game keeps its own EQ and speakers");
+    per_app_switch.set_tooltip_text(Some("When several apps play, each gets the EQ, tone and \"Stereo plays on\" of its own kind; \
+        the card's SBX effects follow the main one (a game, then a film or video, then music), made lighter while music plays beside a game."));
+    let g_auto = group("AUTOMATIC", None);
+    for w in [auto_combo.upcast_ref::<gtk::Widget>(), remember_switch.upcast_ref(), per_app_switch.upcast_ref(), genre_switch.upcast_ref(), tray_switch.upcast_ref()] {
         g_auto.add(w);
     }
-    let refresh_btn = button("Fix");
-    let rr = adw::ActionRow::builder().title("Fix fuzzy sound").subtitle("Sends every setting to the card again (Ctrl+R)").build();
-    rr.add_suffix(&refresh_btn);
-    let reset_btn = gtk::Button::builder().label("Reset").valign(gtk::Align::Center).css_classes(["destructive-action"]).build();
-    let rs = adw::ActionRow::builder().title("Reset the sound card").subtitle("Restarts the card without restarting the PC: for fuzzy sound, a silent speaker or a card that stopped").build();
-    rs.add_suffix(&reset_btn);
-    let defaults_btn = button("Restore");
-    let dfr = adw::ActionRow::builder().title("Restore defaults").subtitle("Every setting, your own profiles and presets").build();
-    dfr.add_suffix(&defaults_btn);
-    let g_q = group("Sound card", None);
-    g_q.add(&adw::ActionRow::builder().title("Creative Sound Blaster ZxR").subtitle("CA0132 · distortion protection on").build());
-    for w in [rr.upcast_ref::<gtk::Widget>(), rs.upcast_ref(), dfr.upcast_ref()] {
-        g_q.add(w);
-    }
-    // Pictures and details for the page
-    let pics_switch = switch("Look up pictures and details online", "Artist photos and logos (TheAudioDB), game art and trailers (Steam), film pictures (TMDB). Only names are sent.");
-    let tmdb_row = adw::PasswordEntryRow::builder().title("TMDB API key (optional, for film and TV pictures)").show_apply_button(true).build();
-    let playnite_row = adw::EntryRow::builder().title("Playnite library folder (optional, for game art and saved trailers)").show_apply_button(true).build();
-    let g_pics = group("Pictures and details", Some("What the page shows behind what's playing. Everything is kept in ~/.cache/sbcommand."));
+    // Pictures and details for the page (kept in ~/.cache/sbcommand).
+    let pics_switch = switch("Look up pictures and details online", "TheAudioDB, Steam and TMDB. Only names are sent.");
+    pics_switch.set_tooltip_text(Some("Artist photos and logos (TheAudioDB), game art and trailers (Steam), film pictures (TMDB). Everything is kept in ~/.cache/sbcommand."));
+    let s0 = Settings::load();
+    // A key or a folder: a short row whose button opens a small box to type it in.
+    let entry_row = |title: &str, sub: &str, secret: bool, now: &str, save: fn(&str)| {
+        let row = adw::ActionRow::builder().title(title).subtitle(sub).build();
+        let entry: gtk::Editable = if secret { gtk::PasswordEntry::builder().show_peek_icon(true).build().upcast() }
+                                   else { gtk::Entry::builder().build().upcast() };
+        entry.set_text(now);
+        entry.set_width_chars(30);
+        let ok = gtk::Button::builder().label("Save").css_classes(["suggested-action"]).build();
+        let bx = gtk::Box::builder().spacing(6).margin_start(6).margin_end(6).margin_top(6).margin_bottom(6).build();
+        bx.append(&entry);
+        bx.append(&ok);
+        let pop = gtk::Popover::builder().child(&bx).build();
+        let mb = gtk::MenuButton::builder().label(if now.is_empty() { "Add…" } else { "Change…" }).popover(&pop).valign(gtk::Align::Center).build();
+        let (e, p, m) = (entry.clone(), pop.clone(), mb.clone());
+        let done = move || {
+            let t = e.text().trim().to_string();
+            m.set_label(if t.is_empty() { "Add…" } else { "Change…" });
+            p.popdown();
+            save(&t);
+        };
+        let d2 = done.clone();
+        ok.connect_clicked(move |_| d2());
+        if let Some(en) = entry.downcast_ref::<gtk::Entry>() { en.connect_activate(move |_| done()); }
+        else if let Some(en) = entry.downcast_ref::<gtk::PasswordEntry>() { en.connect_activate(move |_| done()); }
+        row.add_suffix(&mb);
+        row
+    };
+    let tmdb_row = entry_row("TMDB API key", "Optional, for film and TV pictures", true, &s0.tmdb_key, |t| with_ui(|u| {
+        u.s.borrow_mut().tmdb_key = t.to_string();
+        u.save_now();
+        u.toast(if t.is_empty() { "TMDB key removed" } else { "Saved: film and TV pictures come from TMDB from the next film" });
+    }));
+    let playnite_row = entry_row("Playnite library folder", "Optional, for game art and saved trailers", false, &s0.playnite_dir, |t| with_ui(|u| {
+        u.s.borrow_mut().playnite_dir = t.to_string();
+        u.save_now();
+        u.toast(if t.is_empty() { "Playnite folder removed" } else { "Saved: Playnite's art is used from the next game" });
+    }));
+    let g_pics = group("PICTURES AND DETAILS", None);
     for w in [pics_switch.upcast_ref::<gtk::Widget>(), tmdb_row.upcast_ref(), playnite_row.upcast_ref()] {
         g_pics.add(w);
     }
-    let look_row = adw::ActionRow::builder().title("Look and feel").subtitle("The room's theme, the page layout and your defaults").activatable(true).build();
-    look_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-    let g_view = group("The page", None);
-    g_view.add(&look_row);
-    let about = adw::ActionRow::builder().title(format!("Sound Blaster Command for Linux {}", env!("CARGO_PKG_VERSION")))
-        .subtitle("GPL-3.0-or-later · github.com/ImZoomBoy/soundblaster-command-linux · Anton and Archivo Narrow fonts: SIL Open Font License").build();
-    let g_about = group("About", None);
-    g_about.add(&about);
-    let set_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).build();
+    // The card's three repairs on one line (the red banner says when it stops answering).
+    let refresh_btn = gtk::Button::builder().label("Fix fuzzy sound").tooltip_text("Sends every setting to the card again (Ctrl+R)").build();
+    let reset_btn = gtk::Button::builder().label("Reset card").css_classes(["destructive-action"])
+        .tooltip_text("Restarts the card without restarting the PC: for fuzzy sound, a silent speaker or a card that stopped. The sound stops for a few seconds.").build();
+    let defaults_btn = gtk::Button::builder().label("Restore defaults").tooltip_text("Every setting, your own profiles and presets").build();
+    let fixes = gtk::Box::builder().spacing(6).homogeneous(false).css_classes(["fixes"]).build();
+    for b in [&refresh_btn, &reset_btn, &defaults_btn] {
+        b.set_hexpand(true);
+        fixes.append(b);
+    }
+    let fixes_row = gtk::ListBoxRow::builder().child(&fixes).activatable(false).selectable(false).build();
+    let g_q = group("SOUND CARD · CREATIVE SOUND BLASTER ZXR", None);
+    g_q.add(&fixes_row);
+    let about = label(&format!("Sound Blaster Command for Linux {} · GPL-3.0-or-later · fonts under the SIL Open Font License",
+        env!("CARGO_PKG_VERSION")), &["dim", "small"]);
+    about.set_tooltip_text(Some("github.com/ImZoomBoy/soundblaster-command-linux"));
+    about.set_wrap(true);
+    about.set_width_chars(30);
+    about.set_max_width_chars(30);
+    let set_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
     set_page.append(&g_auto);
-    set_page.append(&g_view);
     set_page.append(&g_pics);
     set_page.append(&g_q);
-    set_page.append(&g_about);
-    {
-        let s0 = Settings::load();
-        pics_switch.set_active(s0.pictures_online);
-        tmdb_row.set_text(&s0.tmdb_key);
-        playnite_row.set_text(&s0.playnite_dir);
+    set_page.append(&about);
+    pics_switch.set_active(s0.pictures_online);
+    // The key and the folder only matter while pictures are looked up.
+    for r in [&tmdb_row, &playnite_row] {
+        r.set_visible(s0.pictures_online);
     }
-    pics_switch.connect_active_notify(|r| with_ui(|u| { u.s.borrow_mut().pictures_online = r.is_active(); u.save_now(); }));
-    tmdb_row.connect_apply(|r| with_ui(|u| { u.s.borrow_mut().tmdb_key = r.text().trim().to_string(); u.save_now(); u.toast("Saved: film and TV pictures come from TMDB from the next film"); }));
-    playnite_row.connect_apply(|r| with_ui(|u| { u.s.borrow_mut().playnite_dir = r.text().trim().to_string(); u.save_now(); u.toast("Saved: Playnite's art is used from the next game"); }));
-    look_row.connect_activated(|_| with_ui(|u| u.show_page("look")));
+    {
+        let (t, p) = (tmdb_row.clone(), playnite_row.clone());
+        pics_switch.connect_active_notify(move |r| {
+            t.set_visible(r.is_active());
+            p.set_visible(r.is_active());
+            with_ui(|u| { u.s.borrow_mut().pictures_online = r.is_active(); u.save_now(); });
+        });
+    }
 
     // The control centre (☰): one panel above the dock, its size set by the
-    // window only. Every tab scrolls inside it, so nothing pressed in it can
-    // change its size.
+    // window only. Each tab is laid out to fit it without scrolling (the
+    // self-test checks); the scrolled windows are only a safety net, and they
+    // keep anything pressed inside from changing the panel's size.
+    // (Not homogeneous: the panel's size is set from the window, and measuring
+    // only the tab shown keeps each layout quick.)
     let side_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).transition_duration(120)
-        .vhomogeneous(true).hhomogeneous(true).vexpand(true).build();
+        .vhomogeneous(false).hhomogeneous(false).vexpand(true).build();
     for (id, w) in [("mixer", mix_page.upcast::<gtk::Widget>()), ("crystalvoice", cv_page.upcast()),
                     ("setup", setup_page.upcast()), ("settings", set_page.upcast()), ("sound", right.upcast()),
                     ("look", look_page.clone().upcast())] {
         // Sideways scrolling only when the window is narrower than the panel.
         let sw = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Automatic).vexpand(true).build();
-        let inner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).margin_start(18).margin_end(18).margin_top(6).margin_bottom(18).build();
+        let inner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).margin_start(18).margin_end(18).margin_top(8).margin_bottom(10).build();
         inner.append(&w);
         sw.set_child(Some(&inner));
         side_stack.add_named(&sw, Some(id));
@@ -771,12 +820,12 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     let side_close = gtk::Button::builder().label("Done").css_classes(["side-done"]).valign(gtk::Align::Center).tooltip_text("Close (Esc)").build();
     let cc_strip = gtk::Button::builder().label("The Strip").css_classes(["side-done", "ghost"]).valign(gtk::Align::Center)
         .tooltip_text("One thin row for the edge of a screen").build();
-    let side_head = gtk::Box::builder().spacing(8).margin_start(20).margin_end(14).margin_top(16).margin_bottom(12).build();
+    let side_head = gtk::Box::builder().spacing(8).margin_start(20).margin_end(14).margin_top(12).margin_bottom(8).build();
     side_head.append(&cc_text);
     side_head.append(&cc_strip);
     side_head.append(&side_close);
     // The tabs: pills, one lit; they scroll sideways in a narrow window.
-    let cc_tab_box = gtk::Box::builder().spacing(4).margin_start(14).margin_end(14).margin_bottom(8).css_classes(["cc-tabs"]).build();
+    let cc_tab_box = gtk::Box::builder().spacing(4).margin_start(14).margin_end(14).margin_bottom(6).css_classes(["cc-tabs"]).build();
     let mut cc_tabs: Vec<(&'static str, gtk::ToggleButton)> = Vec::new();
     for (id, name) in [("sound", "Sound"), ("mixer", "Mixer"), ("crystalvoice", "Microphone"), ("setup", "Speakers"),
                        ("look", "Look and feel"), ("settings", "Settings")] {
@@ -825,28 +874,32 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
         timers: RefCell::new(HashMap::new()),
         card_ok: Cell::new(true),
         win, toasts, banner, spinner,
-        views, wctl, sizer, full_size: Cell::new((1240, 800)), strip_on: Cell::new(false), side_box: side.clone(), cc_rev, cc_scrim, cc_tabs, cc_ro, cc_sub, cc_tab_sw,
+        views, wctl, sizer, full_size: Cell::new((1240, 800)), strip_on: Cell::new(false), side_box: side.clone(), panel_narrow: Cell::new(false), cc_rev, cc_scrim, cc_tabs, cc_ro, cc_sub, cc_tab_sw,
         act_btns, tool_btns, side_stack, side_title, stage, root_ov, look_page, page: page::PageState::default(),
         room: room_da, room_lit: RefCell::new(None), levels: Cell::new([0.0; 6]), meter: RefCell::new(None), t0: Instant::now(),
         np_head, np_kick, np_title, np_sub, np_prog, capsule, cap_cover, cap_pic, cap_icon, cap_title, cap_artist, cap_time, cap_prog,
         path_dots, path_label, path_box, np: RefCell::new(None), np_at: Cell::new(Instant::now()), np_gone: Cell::new(None),
         path_kinds: RefCell::new(vec![]), playing_source: RefCell::new(None),
-        vol_adj, vol_label, out_label, mute, vol_loading: Cell::new(false),
-        sbx_btn: mode_btns[0].clone(), pure_btn: mode_btns[1].clone(), stereo_btns, stereo_row, mode_desc, out_switch,
+        vol_adj, out_label, kind_dd, playing_kind: RefCell::new(String::new()), mute, vol_loading: Cell::new(false),
+        sbx_btn: mode_btns[0].clone(), pure_btn: mode_btns[1].clone(), stereo_btns, stereo_row, mode_desc,
         chips, style_btns: RefCell::new(vec![]), chips_key: RefCell::new(String::new()), scout_box, scout_sw,
         profile_btns, profile_card, fx,
-        eq_on, eq_preset, eq_names: RefCell::new(vec![]), eq_btns, eq_card, eq_bands, eq_view,
+        eq_preset, eq_names: RefCell::new(vec![]), eq_btns, eq_card, eq_bands, eq_view,
         mix_box, mix_layout: RefCell::new(String::new()), mix_rows: RefCell::new(vec![]), mix_meters: RefCell::new(vec![]),
-        boost, boost_label, mic_level, wuh_level,
+        boost, mic_level, wuh_level,
         cv_on, nr, msvm, msvm_level, focus, focus_angle, cv_tiles, cv_vals: (sv_val, fo_val), morph, mic_boost, wuh, voice_test,
-        cfg, spk_type, fr_front, fr_rear, bass_redir, xover, xover_row, hp_gain,
-        test_group, test_layout: RefCell::new(String::new()), test_rows: RefCell::new(vec![]), test_all,
-        auto_combo, remember_switch, genre_switch, tray_switch, refresh_btn, reset_btn, defaults_btn,
+        cfg, spk_type, fr_front, fr_rear, spk_info, bass_redir, xover, xover_row, hp_gain,
+        test_grid, test_layout: RefCell::new(String::new()), test_rows: RefCell::new(vec![]), test_all,
+        auto_combo, remember_switch, genre_switch, tray_switch, per_app_switch, refresh_btn, reset_btn, defaults_btn,
         song: RefCell::new(None), song_pick: RefCell::new(None), eq_override: RefCell::new(None),
         eq_undo: RefCell::new(None), undo_snapshot: RefCell::new(None),
     });
     nr_val.set_visible(false);
     UI.with(|c| *c.borrow_mut() = Some(Rc::downgrade(&ui)));
+    // Mute sits in the dock, by the volume (as in most players).
+    if let Some(ctl) = ui.stage.volume.parent().and_downcast::<gtk::Box>() {
+        ctl.insert_child_after(&ui.mute, ui.stage.volume.prev_sibling().as_ref());
+    }
     connect(&ui, &side_close, &cc_strip);
     ui.connect_page();
     ui.refresh();
@@ -982,7 +1035,6 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
 
     // Output card
     ui.vol_adj.connect_value_changed(on!(ui, |u, a| {
-        u.vol_label.set_label(&format!("{}%", a.value().round() as i64));
         if !u.vol_loading.get() {
             u.send(Job::Volume(a.value().round() as u32));
         }
@@ -993,13 +1045,17 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
             u.send(Job::Mute(b.is_active()));
         }
     }));
+    ui.kind_dd.connect_selected_notify(on!(ui, |u, d| {
+        if let Some(k) = model::KINDS.get(d.selected() as usize) {
+            u.apply_kind(k.0);
+        }
+    }));
     ui.sbx_btn.connect_toggled(on!(ui, |u, b| if b.is_active() { u.set_sbx(true) }));
     ui.pure_btn.connect_toggled(on!(ui, |u, b| if b.is_active() { u.set_sbx(false) }));
     for (id, b) in &ui.stereo_btns {
         let id = *id;
         b.connect_toggled(on!(ui, |u, b| if b.is_active() { u.set_stereo_on(id) }));
     }
-    ui.out_switch.connect_clicked(on!(ui, |u, _b| u.ask_switch_output()));
 
     // SBX profile card
     ui.scout_sw.connect_active_notify(on!(ui, |u, sw| u.set_scout(sw.is_active())));
@@ -1022,11 +1078,6 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
     pb["Export…"].connect_clicked(on!(ui, |u, _b| u.export_item(true)));
 
     // Equaliser card
-    ui.eq_on.connect_active_notify(on!(ui, |u, r| {
-        u.s.borrow_mut().eq_enabled = r.is_active();
-        u.changed(part::EQ);
-        u.refresh();
-    }));
     ui.eq_preset.connect_selected_notify(on!(ui, |u, r| {
         let name = u.eq_names.borrow().get(r.selected() as usize).cloned();
         if let Some(n) = name && n != u.s.borrow().cur_eq() {
@@ -1146,6 +1197,13 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
         u.s.borrow_mut().tray = r.is_active();
         u.save_now();
     }));
+    ui.per_app_switch.connect_active_notify(on!(ui, |u, r| {
+        u.s.borrow_mut().per_app = r.is_active();
+        u.save_now();
+        // Each stream's EQ and stereo, and the card's effects (lighter beside a game).
+        u.send(Job::Listen(Box::new(u.s.borrow().clone())));
+        u.changed(part::FX);
+    }));
     ui.refresh_btn.connect_clicked(on!(ui, |u, _b| u.fix_sound()));
     ui.reset_btn.connect_clicked(on!(ui, |u, _b| u.ask_reset_card()));
     ui.defaults_btn.connect_clicked(on!(ui, |u, _b| u.confirm_defaults()));
@@ -1176,6 +1234,11 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
     add("use-eq", Some(glib::VariantTy::STRING), Box::new(|u, p| {
         if let Some(e) = p.and_then(|v| v.str().map(str::to_string)) {
             u.apply_eq(&e);
+        }
+    }));
+    add("use-kind", Some(glib::VariantTy::STRING), Box::new(|u, p| {
+        if let Some(k) = p.and_then(|v| v.str().map(str::to_string)) {
+            u.apply_kind(&k);
         }
     }));
     add("use-activity", Some(glib::VariantTy::STRING), Box::new(|u, p| {
@@ -1251,19 +1314,22 @@ impl Ui {
         self.refresh();
     }
 
-    /// A game with its own Creative profile started (or a different game):
-    /// pick that profile and its EQ, or go back to the usual game ones.
-    pub fn follow_game(&self, source: &str) -> bool {
-        let changed = self.s.borrow_mut().follow_game(source);
-        if changed {
-            self.changed(part::FX | part::EQ);
+    /// Plays with a kind of content's own sound (and spreads stereo its way).
+    pub fn apply_kind(&self, k: &str) {
+        if self.s.borrow_mut().set_kind(k) {
+            self.changed(part::FX | part::EQ | part::SPEAKER);
+            self.send(Job::Listen(Box::new(self.s.borrow().clone())));
             self.refresh();
+            self.update_stage();
         }
-        changed
     }
 
     pub fn set_style(&self, style: &str) {
-        self.s.borrow_mut().set_style(style);
+        {
+            let mut s = self.s.borrow_mut();
+            s.set_style(style);
+            s.remember_kind();
+        }
         self.changed(part::FX | part::EQ);
         self.refresh();
     }
@@ -1272,7 +1338,11 @@ impl Ui {
         if self.s.borrow().sbx_enabled == on {
             return;
         }
-        self.s.borrow_mut().sbx_enabled = on;
+        {
+            let mut s = self.s.borrow_mut();
+            s.sbx_enabled = on;
+            s.remember_kind();
+        }
         self.changed(part::FX | part::EQ);
         self.refresh();
     }
@@ -1295,7 +1365,11 @@ impl Ui {
         if self.s.borrow().stereo_on == mode {
             return;
         }
-        self.s.borrow_mut().stereo_on = mode.into();
+        {
+            let mut s = self.s.borrow_mut();
+            s.stereo_on = mode.into();
+            s.remember_kind();
+        }
         self.save_now();
         self.send(Job::Listen(Box::new(self.s.borrow().clone())));
         self.refresh();
@@ -1452,6 +1526,7 @@ impl Ui {
     fn pick_eq(&self, name: &str) {
         *self.eq_override.borrow_mut() = self.song.borrow().clone();
         self.apply_eq(name);
+        self.s.borrow_mut().remember_kind();
     }
 
     /// Sets the EQ without counting it as your own choice.
@@ -1831,54 +1906,40 @@ impl Ui {
     pub fn on_detected(&self, d: Option<crate::detect::Detection>, fresh: bool) {
         let Some(d) = d else {
             *self.playing_source.borrow_mut() = None;
+            // (nothing plays: closing ☰ keeps the kind you picked in the Sound tab)
+            self.playing_kind.borrow_mut().clear();
             return;
         };
         *self.playing_source.borrow_mut() = Some(d.source.clone());
+        let kind = crate::meta::kind_of_detection(&d);
+        *self.playing_kind.borrow_mut() = kind.to_string();
         let mode = self.s.borrow().auto_mode.clone();
         if !fresh || mode == "off" {
             return;
         }
-        // Per-game memory: put back what you last used with this game or app.
-        if mode == "auto" && self.s.borrow().remember_apps && self.s.borrow().app_memory.contains_key(&d.source) {
+        let name = model::kind_name(kind);
+        if mode == "auto" {
+            // The kind's own sound, then what you last used with this app, then
+            // a game's own Creative profile.
             let before = self.s.borrow().clone();
-            if self.s.borrow_mut().recall_app(&d.source) {
-                *self.undo_snapshot.borrow_mut() = Some(before);
-                self.changed(part::FX | part::EQ | part::SPEAKER);
-                self.refresh();
-                let (p, e) = { let s = self.s.borrow(); (s.cur_profile(), s.cur_eq()) };
-                self.add_toast(adw::Toast::builder().use_markup(false)
-                    .title(format!("{}: your settings for it (SBX {p}, EQ {e})", d.source))
-                    .button_label("Undo").action_name("win.undo-switch").timeout(6).build());
+            let changed = self.s.borrow_mut().switch_for(kind, &d.source);
+            if !changed {
                 return;
             }
-        }
-        if self.s.borrow().activity == d.activity {
-            if mode == "auto" {
-                let before = self.s.borrow().clone();
-                if self.follow_game(&d.source) {
-                    *self.undo_snapshot.borrow_mut() = Some(before);
-                    let p = self.s.borrow().cur_profile();
-                    self.add_toast(adw::Toast::builder().use_markup(false)
-                        .title(format!("{} is playing: SBX {p}", d.source))
-                        .button_label("Undo").action_name("win.undo-switch").timeout(6).build());
-                }
-            }
-            return;
-        }
-        let label = model::activity_label(d.activity);
-        if mode == "auto" {
-            *self.undo_snapshot.borrow_mut() = Some(self.s.borrow().clone());
-            self.set_activity(d.activity);
-            self.follow_game(&d.source);
-            let p = self.s.borrow().cur_profile();
+            *self.undo_snapshot.borrow_mut() = Some(before);
+            self.changed(part::FX | part::EQ | part::SPEAKER);
+            self.send(Job::Listen(Box::new(self.s.borrow().clone())));
+            self.refresh();
+            let (p, e, sbx) = { let s = self.s.borrow(); (s.cur_profile(), s.cur_eq(), s.sbx_active()) };
+            let sound = if sbx { format!("SBX {p}") } else { "SBX off".into() };
             self.add_toast(adw::Toast::builder().use_markup(false)
-                .title(format!("{} is playing: switched to {label}, SBX {p}", d.source))
+                .title(format!("{} is playing: the {} sound ({sound}, EQ {e})", d.source, name.to_lowercase()))
                 .button_label("Undo").action_name("win.undo-switch").timeout(6).build());
-        } else {
+        } else if self.s.borrow().kind != kind {
             self.add_toast(adw::Toast::builder().use_markup(false)
-                .title(format!("{} is playing. Switch to {label}?", d.source))
-                .button_label("Switch").action_name("win.use-activity")
-                .action_target(&d.activity.to_variant()).timeout(10).build());
+                .title(format!("{} is playing. Use the {} sound?", d.source, name.to_lowercase()))
+                .button_label("Switch").action_name("win.use-kind")
+                .action_target(&kind.to_variant()).timeout(10).build());
         }
     }
 
@@ -2213,15 +2274,17 @@ impl Ui {
         if *self.test_layout.borrow() == layout {
             return;
         }
-        for (_, row, _) in self.test_rows.borrow_mut().drain(..) {
-            self.test_group.remove(&row);
+        for (_, b) in self.test_rows.borrow_mut().drain(..) {
+            self.test_grid.remove(&b);
         }
         let wk = UI.with(|c| c.borrow().clone());
         for ch in Self::channels_now(s) {
-            let row = adw::ActionRow::builder().title(model::channel_name(ch)).build();
-            let b = gtk::Button::builder().icon_name("media-playback-start-symbolic").tooltip_text("Play a test sound")
-                .valign(gtk::Align::Center).css_classes(["circular"]).build();
-            row.add_prefix(&b);
+            let inner = gtk::Box::builder().spacing(6).halign(gtk::Align::Center).build();
+            inner.append(&gtk::Image::from_icon_name("media-playback-start-symbolic"));
+            inner.append(&gtk::Label::new(Some(model::channel_name(ch))));
+            let b = gtk::Button::builder().child(&inner).tooltip_text("Play a test sound").css_classes(["spk-btn"]).build();
+            // Front row, then the back row with the subwoofer in the middle.
+            let (x, y) = match *ch { "FL" => (0, 0), "FC" => (1, 0), "FR" => (2, 0), "RL" => (0, 1), "LFE" => (1, 1), _ => (2, 1) };
             let c = ch.to_string();
             let wk2 = wk.clone();
             b.connect_clicked(move |_| {
@@ -2229,8 +2292,8 @@ impl Ui {
                     u.test_speaker(&c);
                 }
             });
-            self.test_group.add(&row);
-            self.test_rows.borrow_mut().push((ch.to_string(), row, b));
+            self.test_grid.attach(&b, x, y, 1, 1);
+            self.test_rows.borrow_mut().push((ch.to_string(), b));
         }
         *self.test_layout.borrow_mut() = layout;
     }
@@ -2251,7 +2314,7 @@ impl Ui {
         let wk = UI.with(|c| c.borrow().clone());
         for ch in Self::channels_now(s) {
             let m = meter_area(ch_index(ch));
-            let (col, sc) = strip(model::channel_name(ch), -20.0, 0.0, 0.5, fmt_db, Some(&m));
+            let (col, sc) = level_row(model::channel_name(ch), -20.0, 0.0, 0.5, fmt_db, Some(&m));
             sc.set_value(s.trim.get(*ch).copied().unwrap_or(0.0));
             sc.set_sensitive(!s.headphones());
             let c = ch.to_string();
@@ -2274,32 +2337,45 @@ impl Ui {
 
     // ---- side panels
 
-    /// "home" when no side panel is open, else "mixer", "crystalvoice", "setup" or "settings".
-    /// Natural widths of the right-hand column and its top card. The column
-    /// takes the width it asks for and the room gets the rest.
-    pub fn layout_widths(&self) -> (i32, i32) {
-        let mut col = self.mode_desc.parent();
-        while let Some(w) = col.clone() {
-            if w.width_request() == 500 {
-                break;
+    /// Each tab's content: (id, the least width it needs, the width it has).
+    pub fn panel_fit(&self) -> Vec<(String, i32, i32)> {
+        let mut out = vec![];
+        let mut c = self.side_stack.first_child();
+        while let Some(sw) = c {
+            let name = self.side_stack.page(&sw).name().map(|n| n.to_string()).unwrap_or_default();
+            if let Some(inner) = sw.downcast_ref::<gtk::ScrolledWindow>().and_then(|s| s.child()) {
+                // The viewport holds the box with the page (and its 18 px margins).
+                let need = inner.first_child().map(|b| b.measure(gtk::Orientation::Horizontal, -1).0).unwrap_or(0);
+                out.push((name, need, sw.width()));
             }
-            col = w.parent();
+            c = sw.next_sibling();
         }
-        let nat = |w: Option<gtk::Widget>| w.map_or(-1, |w| w.measure(gtk::Orientation::Horizontal, -1).1);
-        (nat(col), nat(self.mode_desc.parent().and_then(|p| p.parent())))
+        out
     }
 
-    /// The control centre's size (the self-test checks it never changes).
-    #[allow(dead_code)]
-    pub fn dbg_sizes(&self) {
-        let m = |n: &str, w: &gtk::Widget| eprintln!("DBG {n}: w {:?} h {:?}", w.measure(gtk::Orientation::Horizontal, -1), w.measure(gtk::Orientation::Vertical, -1));
-        m("win", self.win.upcast_ref()); m("root_ov", self.root_ov.upcast_ref()); m("toasts", self.toasts.upcast_ref());
-        m("views", self.views.upcast_ref()); m("cc_rev", self.cc_rev.upcast_ref()); m("side_box", self.side_box.upcast_ref());
-        eprintln!("DBG visible {:?}", self.views.visible_child_name());
-        let mut v = self.views.first_child();
-        while let Some(x) = v { eprintln!("DBG   view {:?} w {:?} h {:?} visible {}", self.views.page(&x).name(), x.measure(gtk::Orientation::Horizontal, -1), x.measure(gtk::Orientation::Vertical, -1), x.is_child_visible()); v = x.next_sibling(); }
-        let mut c = self.root_ov.first_child();
-        while let Some(x) = c { eprintln!("DBG   root_ov child {} meas={}", x.type_().name(), self.root_ov.is_measure_overlay(&x)); c = x.next_sibling(); }
+    /// Each tab's content: (id, the height it needs, the height the panel has
+    /// for it). Every tab should fit without scrolling.
+    pub fn panel_heights(&self) -> Vec<(String, i32, i32)> {
+        let (pw, ph) = self.side_box_size();
+        // The panel's border, its head, the tabs and the line under them.
+        let mut room = ph - 2;
+        let mut k = self.side_box.first_child();
+        while let Some(x) = k {
+            if x != *self.side_stack.upcast_ref::<gtk::Widget>() {
+                room -= x.measure(gtk::Orientation::Vertical, pw - 2).1;
+            }
+            k = x.next_sibling();
+        }
+        let mut out = vec![];
+        let mut c = self.side_stack.first_child();
+        while let Some(sw) = c {
+            let name = self.side_stack.page(&sw).name().map(|n| n.to_string()).unwrap_or_default();
+            if let Some(v) = sw.downcast_ref::<gtk::ScrolledWindow>().and_then(|s| s.child()) {
+                out.push((name, v.measure(gtk::Orientation::Vertical, pw - 2).1, room));
+            }
+            c = sw.next_sibling();
+        }
+        out
     }
 
     pub fn side_box_size(&self) -> (i32, i32) {
@@ -2323,6 +2399,11 @@ impl Ui {
     pub fn close_panel(&self) {
         self.cc_rev.set_reveal_child(false);
         self.cc_scrim.set_visible(false);
+        // (the Sound tab may have been showing another kind's sound)
+        let pk = self.playing_kind.borrow().clone();
+        if !pk.is_empty() && pk != self.s.borrow().kind {
+            self.apply_kind(&pk);
+        }
     }
 
     pub fn current_page(&self) -> String {
@@ -2390,7 +2471,6 @@ impl Ui {
         }
         // Output card
         self.out_label.set_label(if hp { "HEADPHONES" } else { "SPEAKERS" });
-        self.vol_label.set_label(&format!("{}%", self.vol_adj.value().round() as i64));
         self.sbx_btn.set_active(s.sbx_enabled);
         self.pure_btn.set_active(!s.sbx_enabled);
         for (id, b) in &self.stereo_btns {
@@ -2400,13 +2480,9 @@ impl Ui {
         self.stereo_row.set_sensitive(can_spread);
         self.stereo_row.set_tooltip_text(if can_spread { None } else if hp { Some("Headphones are stereo") }
             else { Some("Only with rear speakers (Speaker setup)") });
-        self.out_switch.set_child(Some(&{
-            let b = gtk::Box::builder().spacing(8).build();
-            b.append(&gtk::Image::from_icon_name(if hp { "audio-speakers-symbolic" } else { "audio-headphones-symbolic" }));
-            b.append(&gtk::Label::new(Some(if hp { "Switch to speakers" } else { "Switch to headphones" })));
-            b
-        }));
         self.mode_desc.set_label(&mode_description(&s));
+        let k = if s.kind.is_empty() { match s.activity.as_str() { "game" => "game", "movie" => "film", _ => "music" } } else { s.kind.as_str() };
+        self.kind_dd.set_selected(model::KINDS.iter().position(|x| x.0 == k).unwrap_or(0) as u32);
 
         // SBX profile card
         self.rebuild_chips(&s);
@@ -2435,7 +2511,6 @@ impl Ui {
         self.fx_values();
 
         // Equaliser card
-        self.eq_on.set_active(s.eq_enabled);
         let enames = s.eq_list();
         let epos = enames.iter().position(|n| *n == s.cur_eq()).unwrap_or(0) as u32;
         set_strings(&self.eq_preset, &self.eq_names, enames);
@@ -2467,14 +2542,35 @@ impl Ui {
 
         // Speaker setup
         self.cfg.set_selected(SPEAKER_CONFIGS.iter().position(|c| *c == s.speaker_config).unwrap_or(4) as u32);
-        self.spk_type.set_selected(SPEAKER_TYPES.iter().position(|c| *c == s.speaker_type).unwrap_or(0) as u32);
+        let pos = |id: &str| SPEAKER_TYPES.iter().position(|c| *c == id);
+        let ti = pos(&s.speaker_type).or(pos("desktop")).unwrap_or(0);
+        self.spk_type.set_selected(ti as u32);
+        // (the row only fills its subtitle when the pick changes, so the first
+        // choice, picked from the start, would show none)
+        self.spk_type.set_subtitle(SPEAKER_TYPE_LABELS[ti]);
         self.fr_front.set_active(s.full_range_front);
         self.fr_rear.set_active(s.full_range_rear);
         self.bass_redir.set_active(s.bass_redirect);
         self.xover.set_value(s.crossover as f64);
         self.bass_redir.set_sensitive(s.has_sub() && !hp);
         self.xover_row.set_sensitive(s.has_sub() && s.bass_redirect && !hp);
+        // A brand or a size decides some of these, so they aren't asked: one line
+        // says what it set. "Set by hand" shows them all.
+        let by_hand = s.speaker_type == "custom";
+        let brand = s.speaker_type == "dtt2200";
+        for w in [self.fr_front.upcast_ref::<gtk::Widget>(), self.fr_rear.upcast_ref()] {
+            w.set_visible(by_hand);
+        }
+        for w in [self.bass_redir.upcast_ref::<gtk::Widget>(), self.xover_row.upcast_ref()] {
+            w.set_visible(!brand);
+        }
+        self.spk_info.set_visible(!by_hand);
+        let (title, sub) = speaker_summary(&s, brand);
+        self.spk_info.set_title(&title);
+        self.spk_info.set_subtitle(&sub);
         self.hp_gain.set_selected(u32::from(s.hp_600ohm));
+        // (it sets the headphone amp only, so it shows while on headphones)
+        self.hp_gain.set_visible(hp);
         self.rebuild_test_rows(&s);
 
         // Settings
@@ -2482,6 +2578,7 @@ impl Ui {
         self.remember_switch.set_active(s.remember_apps);
         self.genre_switch.set_active(s.genre_online);
         self.tray_switch.set_active(s.tray);
+        self.per_app_switch.set_active(s.per_app);
 
         self.update_item_buttons();
         self.loading.set(was);
@@ -2491,11 +2588,11 @@ impl Ui {
 
     pub fn refresh_summary(&self) {
         let s = self.s.borrow().clone();
-        self.boost_label.set_label(&if s.boost_db > 0.0 {
-            format!("Speaker boost +{} dB: louder, like Windows (which ran the card at +9). Lower it if loud sound gets fuzzy.", s.boost_db)
+        self.boost.set_tooltip_text(Some(&if s.boost_db > 0.0 {
+            format!("Boost +{} dB: louder, as Windows ran the card (+9). Lower it if loud sound gets fuzzy.", s.boost_db)
         } else {
-            "Speaker boost raises the card's output above the safe 0 dB, like Windows did (+9). Lower it if loud sound gets fuzzy.".into()
-        });
+            "Boost makes the card louder than the safe 0 dB, as Windows did (+9). Lower it if loud sound gets fuzzy.".into()
+        }));
         // The EQ graph: the dashed line is what SBX Bass adds through it (5.1/2.1).
         *self.eq_view.boost.borrow_mut() = model::bass_boost(&s);
         self.eq_view.live.set(model::effective_eq(&s).1);
@@ -2510,6 +2607,22 @@ impl Ui {
         let sound = if s.sbx_active() { format!("SBX {}", s.cur_profile()) } else { "Pure".into() };
         self.win.set_title(Some(&format!("Sound Blaster Command — {} · {sound}", model::activity_label(&s.activity))));
     }
+}
+
+/// What a brand or size sets: (which speakers play full range, where the bass goes).
+pub fn speaker_summary(s: &Settings, brand: bool) -> (String, String) {
+    let fr = |on: bool| if on { "full-range" } else { "not full-range" };
+    let title = if model::channels(&s.speaker_config).contains(&"RL") {
+        format!("Fronts {} · rears {}", fr(s.full_range_front), fr(s.full_range_rear))
+    } else {
+        format!("Fronts {}", fr(s.full_range_front))
+    };
+    let sub = match (brand, s.has_sub(), s.bass_redirect) {
+        (true, true, true) => format!("Bass below {} Hz goes to the subwoofer", s.crossover),
+        (true, true, false) => "The subwoofer plays only its own channel".into(),
+        _ => String::new(),
+    };
+    (title, sub)
 }
 
 /// One sentence about what SBX/Pure and 5.1/2.1 mean right now.

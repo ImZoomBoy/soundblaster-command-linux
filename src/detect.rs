@@ -193,11 +193,76 @@ pub fn classify(st: &Stream, players: &[Player], is_game: impl Fn(&Stream) -> bo
     None
 }
 
-/// Picks the newest stream that can be told, out of everything playing.
+/// Which source sets the card when several play: a game, then a film, TV or
+/// video, then music (calls and the like are never told apart at all).
+fn rank(activity: &str) -> u8 {
+    match activity {
+        "game" => 3,
+        "movie" => 2,
+        "music" => 1,
+        _ => 0,
+    }
+}
+
+/// Picks what sets the card out of everything playing: the highest ranked
+/// (a game beats a film beats music), the newest among equals. Background music
+/// started during a game no longer takes the card away from it.
 pub fn pick(streams: &[Stream], players: &[Player], is_game: impl Fn(&Stream) -> bool) -> Option<Detection> {
     let mut v: Vec<&Stream> = streams.iter().collect();
     v.sort_by_key(|s| std::cmp::Reverse(s.index));
-    v.into_iter().find_map(|s| classify(s, players, &is_game))
+    let mut best: Option<Detection> = None;
+    for d in v.into_iter().filter_map(|s| classify(s, players, &is_game)) {
+        if best.as_ref().is_none_or(|b| rank(d.activity) > rank(b.activity)) {
+            best = Some(d);
+        }
+    }
+    best
+}
+
+/// Every playing stream that can be told: (its index, which is PipeWire's
+/// object.serial, and what it is).
+pub fn detect_each() -> Vec<(u64, Detection)> {
+    if crate::card::dry_run() {
+        return vec![];
+    }
+    let st = streams();
+    if st.is_empty() {
+        return vec![];
+    }
+    let pl = players();
+    st.iter().filter_map(|s| classify(s, &pl, |s| s.pid.is_some_and(|p| pid_is_game(p, &s.binary))).map(|d| (s.index, d))).collect()
+}
+
+/// What sets the card out of `detect_each`'s list (as `pick`: the highest
+/// ranked, the newest among equals).
+pub fn main_of(each: &[(u64, Detection)]) -> Option<Detection> {
+    let mut best: Option<&(u64, Detection)> = None;
+    for e in each {
+        if best.is_none_or(|b| rank(e.1.activity) > rank(b.1.activity) || (rank(e.1.activity) == rank(b.1.activity) && e.0 > b.0)) {
+            best = Some(e);
+        }
+    }
+    best.map(|b| b.1.clone())
+}
+
+/// Music playing beside a game: the card's effects are then made lighter for both.
+pub fn music_beside_game(each: &[(u64, Detection)]) -> bool {
+    each.iter().any(|(_, d)| d.activity == "game") && each.iter().any(|(_, d)| d.activity == "music")
+}
+
+/// The same, looked up at most every two seconds (card writes happen often
+/// while a knob turns).
+pub fn music_beside_game_now() -> bool {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static LAST: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, v)) = *last && at.elapsed() < Duration::from_secs(2) {
+        return v;
+    }
+    let v = music_beside_game(&detect_each());
+    *last = Some((Instant::now(), v));
+    v
 }
 
 fn str_of(v: &Value) -> String {
@@ -409,6 +474,18 @@ mod tests {
     fn newest_stream_wins() {
         let s = [st(1, "Spotify", "", "music", "", 2), st(5, "mpv", "mpv", "", "", 2), st(9, "plasmashell", "", "event", "", 2)];
         assert_eq!(pick(&s, &[], no).unwrap().activity, "movie");
+    }
+
+    #[test]
+    fn a_game_keeps_the_card_when_music_starts() {
+        // Music started after the game (a higher index) doesn't take over.
+        let s = [st(3, "Rocket League", "RocketLeague.exe", "", "", 2), st(8, "Spotify", "", "music", "", 2)];
+        assert_eq!(pick(&s, &[], no).unwrap().activity, "game");
+        let each: Vec<(u64, Detection)> = s.iter().filter_map(|x| classify(x, &[], no).map(|d| (x.index, d))).collect();
+        assert!(music_beside_game(&each));
+        // Two of the same rank: the newest.
+        let s = [st(3, "mpv", "mpv", "", "", 2), st(8, "vlc", "vlc", "", "", 2)];
+        assert_eq!(pick(&s, &[], no).unwrap().source.to_lowercase(), "vlc");
     }
 
     #[test]

@@ -51,6 +51,14 @@ pub enum Event {
 }
 
 pub fn apply(s: &Settings, parts: u32) -> Result<(), String> {
+    // Music beside a game: lighter effects for both (model::beside_fx).
+    let blended;
+    let s = if parts & (part::FX | part::REFRESH) != 0 && s.per_app {
+        blended = Settings { blend: detect::music_beside_game_now(), ..s.clone() };
+        &blended
+    } else {
+        s
+    };
     crate::meters::set_bass_route(s);
     if !card::present() {
         return Err("card not available".into());
@@ -95,7 +103,7 @@ pub fn apply_configs(s: &Settings) {
     let _ = apply(s, part::ALL);
     system::apply_outputs(s);
     system::relabel_aux_streams();
-    system::spread_streams(s.spread_mode());
+    system::apply_streams(s);
 }
 
 pub fn spawn(events: async_channel::Sender<Event>) -> mpsc::Sender<Job> {
@@ -238,9 +246,13 @@ pub fn watch() -> ! {
     system::watch_new_streams(|| {
         std::thread::sleep(Duration::from_millis(60));
         system::relabel_aux_streams();
-        system::spread_streams(Settings::load().spread_mode());
+        system::apply_streams(&Settings::load());
     });
     let mut songs = detect::SongTracker::default();
+    // What plays (each app and its kind) and whether music plays beside a game,
+    // as last seen: each app's own sound and the lighter effects follow them.
+    let mut last_streams = String::new();
+    let mut last_blend = false;
     let mut tray = if Settings::load().tray { crate::tray::start() } else { None };
     loop {
         // Keep the tray in step with changes made in the window.
@@ -256,8 +268,21 @@ pub fn watch() -> ! {
             (None, true) => tray = crate::tray::start(),
             (None, false) => {}
         }
+        let each = detect::detect_each();
+        let streams_now = each.iter().map(|(i, d)| format!("{i}:{}:{}", d.activity, d.source)).collect::<Vec<_>>().join(",")
+            + &format!("|{}|{}|{}", cur.kind, cur.per_app, cur.stereo_on);
+        if streams_now != last_streams {
+            system::apply_streams(&cur);
+            last_streams = streams_now;
+        }
+        let blend = cur.per_app && detect::music_beside_game(&each);
+        if blend != last_blend && card::present() {
+            let _ = apply(&cur, part::FX);
+            eprintln!("sbcommand: {}", if blend { "music beside a game: lighter effects" } else { "the card's own effects again" });
+            last_blend = blend;
+        }
         if cur.auto_mode != "off" {
-            let now = detect::detect();
+            let now = detect::main_of(&each);
             if let Some((Some(d), true)) = tracker.update(now.clone()) {
                 background_switch(d);
             }
@@ -294,20 +319,6 @@ fn window_open() -> bool {
     system::run("busctl", &["--user", "status", "com.local.sbcommand"]).is_some()
 }
 
-/// Switches activity from the background service and saves it.
-fn switch_to(activity: &str) -> bool {
-    let mut s = Settings::load();
-    if s.activity == activity {
-        return false;
-    }
-    s.set_activity(activity);
-    if s.save().is_err() {
-        return false;
-    }
-    let _ = apply(&s, part::FX | part::EQ | part::SPEAKER);
-    true
-}
-
 fn notify(args: &[&str]) -> Option<String> {
     let mut a = vec!["-a", "Sound Blaster Command", "-i", "com.local.sbcommand"];
     a.extend_from_slice(args);
@@ -319,42 +330,32 @@ fn background_switch(d: detect::Detection) {
     if window_open() {
         return;
     }
-    // Per-game memory: put back what was last used with this game or app.
+    // The kind of content's own sound, then what was last used with this game
+    // or app, then a game's own Creative profile.
     let mut s = Settings::load();
-    if s.auto_mode == "auto" && s.recall_app(&d.source) && s.save().is_ok() {
-        let _ = apply(&s, part::FX | part::EQ | part::SPEAKER);
-        let _ = notify(&["-t", "3000", "-u", "low", "-h", "boolean:transient:true",
-            &format!("{}: your settings for it", d.source), &format!("SBX {} · EQ {}", s.cur_profile(), s.cur_eq())]);
-        return;
-    }
-    if s.activity == d.activity || s.auto_mode == "off" {
-        // Same activity: a game may still have its own Creative profile.
-        if s.auto_mode == "auto" && s.follow_game(&d.source) && s.save().is_ok() {
-            let _ = apply(&s, part::FX | part::EQ);
-            let _ = notify(&["-t", "3000", "-u", "low", "-h", "boolean:transient:true",
-                &format!("{} is playing", d.source), &format!("SBX {} · EQ {}", s.cur_profile(), s.cur_eq())]);
-        }
-        return;
-    }
-    let label = crate::model::activity_label(d.activity);
+    let kind = crate::meta::kind_of_detection(&d);
+    let name = crate::model::kind_name(kind).to_lowercase();
     let body = format!("{} is playing", d.source);
     if s.auto_mode == "auto" {
-        if switch_to(d.activity) {
-            let mut s = Settings::load();
-            if s.follow_game(&d.source) && s.save().is_ok() {
-                let _ = apply(&s, part::FX | part::EQ);
-            }
-            eprintln!("sbcommand: switched to {label} for {}", d.source);
-            let _ = notify(&["-t", "3000", "-u", "low", "-h", "boolean:transient:true", &format!("Switched to {label}"), &body]);
+        if s.switch_for(kind, &d.source) && s.save().is_ok() {
+            let _ = apply(&s, part::FX | part::EQ | part::SPEAKER);
+            system::apply_streams(&s);
+            eprintln!("sbcommand: the {name} sound for {}", d.source);
+            let _ = notify(&["-t", "3000", "-u", "low", "-h", "boolean:transient:true", &body,
+                &format!("The {name} sound: SBX {} · EQ {}", s.cur_profile(), s.cur_eq())]);
         }
-    } else {
+    } else if s.kind != kind {
         // Ask without blocking the watcher; act only if the button is pressed.
-        let activity = d.activity;
         std::thread::spawn(move || {
-            let action = format!("switch=Switch to {label}");
-            let answer = notify(&["-t", "15000", "-A", &action, "-w", &body, &format!("Switch to the {label} sound?")]);
-            if answer.is_some_and(|a| a.trim() == "switch") && switch_to(activity) {
-                eprintln!("sbcommand: switched to {label} (suggested)");
+            let action = format!("switch=Use the {name} sound");
+            let answer = notify(&["-t", "15000", "-A", &action, "-w", &body, &format!("Use the {name} sound?")]);
+            if answer.is_some_and(|a| a.trim() == "switch") {
+                let mut s = Settings::load();
+                if s.set_kind(kind) && s.save().is_ok() {
+                    let _ = apply(&s, part::FX | part::EQ | part::SPEAKER);
+                    system::apply_streams(&s);
+                    eprintln!("sbcommand: the {name} sound (suggested)");
+                }
             }
         });
     }
