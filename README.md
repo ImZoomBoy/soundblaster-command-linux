@@ -13,7 +13,7 @@ Creative's SBX effects and profiles, the equaliser, speaker setup and microphone
 ![PipeWire](https://img.shields.io/badge/audio-PipeWire-ff416c)
 ![Linux](https://img.shields.io/badge/platform-Linux-333?logo=linux)
 
-<img src="docs/screenshots/hero.png" alt="Sound Blaster Command: the room with live speakers, now playing, the signal path, SBX knobs and the equaliser" width="100%">
+<img src="docs/screenshots/hero.png" alt="Sound Blaster Command: a song fills the window, with the artist's studio, live speakers, the album cover and four plain sound choices" width="100%">
 
 </div>
 
@@ -42,8 +42,38 @@ one window and works around those defaults.
 
 ## Highlights
 
+- **What's playing fills the window.** The title, the artist or studio, credits and a short bio, the cover,
+  and behind it all the artist's photos printed in red, a game's official art, or a film's stills.
+- **A room that follows what's playing**, seen over your shoulder: a studio with the artist's neon sign and a
+  shelf of their other albums for a studio song; a concert hall or a stadium for a live recording; a cinema
+  for a film; a gaming room with a monitor for a game; a scoreboard on the big screen for a match. Each speaker
+  lights up and pulses with its live level.
+  Tap one to hear a test sound on it.
+- **The game monitor:** the game's logo, then its trailer once, muted, then its pictures every 10 seconds.
+  Point at it for buttons; full screen shows the pictures large, with *Play the trailer · with sound*.
+  Films and series get the same screen with their stills; a trailer there only plays when you ask.
+- **Four sound choices in plain words** along the bottom: where the sound plays (in front of you, all
+  around you), the room (close like the studio, like a live show, untouched), the tone (warmer, as mixed,
+  brighter) and extras (clearer voices, more bass, footsteps sooner in games). Each one sets the real
+  SBX profile, effects and equaliser.
+- **Look and feel:** five themes (Over your shoulder, Blueprint, Screenprint, Callouts, and Compact) and seven
+  layouts for the sound choices and the cover. Pick one for every page or save it as the default for music,
+  films, TV, games, sport or video.
+- **No title bar:** the page fills the window. **☰** at the bottom right opens the **control centre**: one panel
+  above the dock with what plays and how (the readout, SBX, the EQ, the song) and tabs for Sound, Mixer,
+  Microphone, Speakers, Look and feel and Settings. It keeps one size whatever you press; each tab scrolls
+  inside it. The window buttons appear at the top right when you point there; drag the page to move the window.
+- **Three compact views:** small windows (under 900 × 600) show the **Remote** or **Over your shoulder, mini**
+  (your pick in Look and feel). The mini is the main page made tall: the photo printed in red, the artist's neon
+  sign (or an LED wall of dots for films and games, a scoreboard for a match), the six dot speakers round you,
+  and the four choices as rows. The **Remote** is a tall card with the artist
+  photo printed in red (or the album art, an option), the readout, the room with your speakers, the four
+  choices as tiles and the controls. **The Strip** (in ☰) is one 76-pixel row for the edge of a screen or a
+  second screen left on all day: the cover, the title, the six speakers with their meters, the four choices,
+  the controls with the readout (as on the page), a pin that keeps it above other windows on every desktop
+  (KDE), and its own minimise and close buttons, apart from the rest.
 - Creative's SBX effects: Surround, Crystalizer, Bass, Smart Volume and Dialog+, each with an on/off switch and a
-  level knob.
+  level knob, in the **Sound** panel with the equaliser.
 - Creative's SBX profiles with their exact values from Creative's Sound Blaster Command for Windows (Gaming,
   Cinema, Concert, Night, FPS, Racing, RPG, Strategy, Stadium, Adventure), separate speaker and headphone values
   where Creative has them, plus this app's own Music profile for studio albums. You can add your own and import
@@ -52,13 +82,11 @@ one window and works around those defaults.
   themselves when that game runs.
 - A 10-band equaliser you adjust by dragging, with Creative's presets from Sound Blaster Command and the Linux
   driver's older Rock as "Rock (classic)".
-- A room view of your speakers with live level meters. Click a speaker to play a test sound on it.
-- What's playing (title, artist, cover art) and the path its sound takes: the app's format, any resampling or
-  downmixing by PipeWire, the card's processing, and the speakers it reaches.
+- The path the sound takes, one click away: the app's format, any resampling or downmixing by PipeWire, the
+  card's processing, and the speakers it reaches.
 - SBX or Pure mode (Pure turns off the SBX effects; your equaliser stays on).
 - Each source plays on the speakers it was made for, by itself: a stereo song on the fronts and subwoofer,
-  a 5.1 film, game or track on all six.
-- Stereo can play on the fronts only, or on the fronts and rears. 5.1 films and games play as mixed.
+  a 5.1 film, game or track on all six. Stereo can also play on the rears.
 - Game, Movie & TV and Music modes, picked automatically when Steam, a film or Spotify starts if you want.
   Settings are remembered per game and app, and the Music EQ can follow each song's genre.
 - A tray icon for the common switches, so you don't need to open the window.
@@ -68,51 +96,87 @@ one window and works around those defaults.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/movie.png" alt="A 5.1 film playing on all six speakers"><br>
-<b>Movie & TV.</b> A 5.1 film from Jellyfin: every speaker lit, each with its own sound. The capsule shows
-the poster, progress and a compact signal path (<code>48k · SBX Cinema · 5.1</code>).</td>
-<td width="50%"><img src="docs/screenshots/game.png" alt="Game mode with the FPS profile and Scout Mode"><br>
-<b>Game.</b> The game's name and artwork come from Steam's own files. The FPS profile is selected, and
-Scout Mode (footsteps and quiet sounds sooner) appears only for games.</td>
+<td width="50%"><img src="docs/screenshots/movie.png" alt="A 5.1 film: the cinema screen shows the film's stills"><br>
+<b>Movie & TV.</b> A 5.1 film from Jellyfin: a ticket across the top (<i>Admit one</i>, the screen, the
+sound and the speakers it plays on), the cinema screen showing the title and then the film's stills, and
+every speaker lit.</td>
+<td width="50%"><img src="docs/screenshots/game.png" alt="A game: its art, the monitor and Scout Mode"><br>
+<b>Game.</b> The game's art comes from Steam's own files (and the store, or your Playnite library). The
+monitor shows the logo, the trailer once (muted), then the pictures. <i>Footsteps</i> (Scout Mode) is a
+game-only extra.</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/pure.png" alt="Pure mode: SBX effects off, equaliser on"><br>
-<b>Pure.</b> The SBX effects are off and their knobs grey out. The equaliser stays on, as in Creative's
+<td><img src="docs/screenshots/music.png" alt="A studio song in the artist's studio"><br>
+<b>Music.</b> A studio song plays in the artist's studio: their name in neon, their other albums on the
+shelf. A stereo song uses the front speakers and subwoofer; the rest wait.</td>
+<td><img src="docs/screenshots/pure.png" alt="Pure: SBX off, the equaliser on"><br>
+<b>Pure.</b> Room set to <i>untouched</i>: the SBX effects are off. The equaliser stays on, as in Creative's
 own app, where SBX and the equaliser are separate switches.</td>
-<td><img src="docs/screenshots/music.png" alt="A stereo song playing on the front speakers and subwoofer"><br>
-<b>Music.</b> A stereo song plays on the front speakers and subwoofer; the centre and rears wait. A 5.1
-track, film or game uses all six speakers by itself.</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/rears.png" alt="Stereo playing on the front and rear speakers"><br>
-<b>Stereo plays on + Rears.</b> A stereo song also plays on the rear speakers, like Creative's Windows app.
-The room and the signal path show exactly where it goes.</td>
+<td><img src="docs/screenshots/rears.png" alt="Stereo on the rears, with the Rows layout"><br>
+<b>All around you, Rows layout.</b> A stereo song also plays on the rear speakers. Here the sound choices
+sit in rows beside the cover, one of the seven layouts.</td>
 <td><img src="docs/screenshots/signal-path-rears.png" alt="Signal path with the stereo copied to the rears"><br>
-<b>Signal path, stereo on the rears.</b> The rears get a copy of the fronts, 3 dB quieter, so the sound
-fills the room without pulling the stereo image backwards.</td>
+<b>Signal path.</b> Click the readout at the bottom right (<code>5.1</code>, <code>STEREO → 2.1</code>):
+each step the sound takes. Here the rears get a copy of the fronts, 3 dB quieter.</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/signal-path-music.png" alt="Signal path for a stereo song"><br>
-<b>Signal path, stereo song.</b> Spotify sends 44.1 kHz stereo; PipeWire resamples it to the card's 48 kHz
-(amber: changed); SBX and the EQ shape it (pink: effects); it plays on the fronts and subwoofer.</td>
-<td><img src="docs/screenshots/signal-path-film.png" alt="Signal path for a 5.1 film"><br>
-<b>Signal path, 5.1 film.</b> 48 kHz 5.1 straight through, no resampling, each channel to its own speaker.</td>
+<td><img src="docs/screenshots/blueprint.png" alt="The Blueprint theme"><br>
+<b>Blueprint.</b> The room as a plan from above: angles, the listening zone, the subwoofer on the floor.</td>
+<td><img src="docs/screenshots/screenprint.png" alt="The Screenprint theme"><br>
+<b>Screenprint.</b> A printed room with solid speakers; the game's monitor hangs on the wall.</td>
 </tr>
 <tr>
+<td><img src="docs/screenshots/callouts.png" alt="The Callouts theme"><br>
+<b>Callouts.</b> An isometric drawing with every speaker labelled; the cinema screen sits on the far wall.</td>
+<td><img src="docs/screenshots/look.png" alt="Look and feel"><br>
+<b>Look and feel.</b> The theme, the layout, and the default for each kind of page, with
+<i>Back to the default view</i> and <i>Reset to the original defaults</i>.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/compact.png" alt="The Remote" width="60%"><br>
+<b>The Remote.</b> Small windows show it by themselves: the artist photo printed in red, the cover by the
+title, the readout, your speakers with their meters, and the four choices as tiles; each opens its options
+in a sheet from the bottom.</td>
+<td><img src="docs/screenshots/compact-album.png" alt="The Remote with the album art" width="60%"><br>
+<b>The Remote, album art.</b> The option in Look and feel: the album art whole and in colour at the top.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/compact-mini.png" alt="Over your shoulder, mini" width="60%"><br>
+<b>Over your shoulder, mini.</b> The main page made tall: the artist's neon sign, the six dot speakers round you,
+the four choices as rows.</td>
+<td><img src="docs/screenshots/compact-mini-film.png" alt="Over your shoulder, mini with a film" width="60%"><br>
+<b>Over your shoulder, mini, a film.</b> An LED wall of dots shows the title's logo, then its stills.</td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/screenshots/strip.png" alt="The Strip"><br>
+<b>The Strip.</b> One 76-pixel row for the edge of a screen: the cover and title, the six speakers with their
+meters (tap one to test it), the four choices, the controls with the readout, a pin to keep it above other
+windows, and the window's own buttons in a group of their own.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/sound.png" alt="The Sound panel"><br>
+<b>Sound.</b> Speakers or headphones, SBX or Pure, the SBX profile and its five effect knobs, and the
+equaliser you drag.</td>
 <td><img src="docs/screenshots/mixer.png" alt="Mixer with live meters and Speaker boost"><br>
 <b>Mixer.</b> A fader and live LED meter per speaker, <b>Speaker boost</b> (0 to +9 dB, like Windows), and
 the microphone and What U Hear recording levels.</td>
+</tr>
+<tr>
 <td><img src="docs/screenshots/crystalvoice.png" alt="CrystalVoice microphone effects"><br>
 <b>CrystalVoice.</b> Noise Reduction, Smart Volume, Focus (how wide the mic listens), VoiceFX, mic boost,
 What U Hear and a record-and-play-back test.</td>
-</tr>
-<tr>
 <td><img src="docs/screenshots/setup.png" alt="Speaker setup"><br>
 <b>Speaker setup.</b> 2.0 to 5.1, speaker type (including Cambridge SoundWorks DTT2200), full-range
 fronts/rears, bass redirection and crossover, headphone gain, and a test sound for every speaker.</td>
+</tr>
+<tr>
 <td><img src="docs/screenshots/settings.png" alt="Settings"><br>
-<b>Settings.</b> What to do when something starts playing, per-game memory, online genre lookup, the tray
-icon, and fixes: resend everything, reset the card, restore defaults.</td>
+<b>Settings.</b> What to do when something starts playing, per-game memory, the page's pictures and
+details (online lookups, an optional TMDB key, your Playnite folder), the tray icon, and fixes.</td>
+<td><img src="docs/screenshots/signal-path-film.png" alt="Signal path for a 5.1 film"><br>
+<b>Signal path, 5.1 film.</b> 48 kHz 5.1 straight through, no resampling, each channel to its own speaker.</td>
 </tr>
 </table>
 
@@ -154,12 +218,14 @@ These are real problems with the ZxR on a stock Linux system, found while buildi
 - **GTK 4.14+** and **libadwaita 1.6+**
 - **Rust** (edition 2024, so 1.85 or newer) to build
 - systemd (user services, `busctl`), `curl`; optional: `notify-send`, a StatusNotifierItem tray (KDE Plasma, or the AppIndicator extension on GNOME)
+- Optional, for game trailers: `ffmpeg` (saves Steam's trailer streams once) and the GStreamer plugins GTK plays
+  video with (`gst-plugins-good`, `gst-libav`). Without them the pictures still show.
 - A **Creative Sound Blaster ZxR**; see [Supported cards and systems](#supported-cards-and-systems)
 
 On Arch / CachyOS:
 
 ```sh
-sudo pacman -S --needed rust gtk4 libadwaita alsa-lib pipewire pipewire-pulse wireplumber curl libnotify
+sudo pacman -S --needed rust gtk4 libadwaita alsa-lib pipewire pipewire-pulse wireplumber curl libnotify ffmpeg gst-plugins-good gst-libav
 ```
 
 ### Build and install (no sudo)
@@ -196,7 +262,7 @@ Open **Sound Blaster Command** from your app menu, or:
 
 ```sh
 sbcommand                # the window
-sbcommand mixer          # open straight to a panel: mixer, crystalvoice, setup, settings
+sbcommand mixer          # open straight to a panel: sound, look, mixer, crystalvoice, setup, settings
 sbcommand apply          # send the saved settings to the card (what the service does at login)
 sbcommand detect         # read-only: what's playing and what the app would pick
 sbcommand selftest       # drive every control in a dry run (no card, temporary settings)
@@ -206,17 +272,39 @@ Tips:
 
 - **Knobs turn:** drag round them clockwise or anticlockwise, scroll, or focus one and use the arrow keys.
   Turning a knob switches its effect on; the small LED above it switches it off.
-- **Click a speaker** in the room to hear a test sound on it.
-- **Click the signal path** in the capsule to see each step the sound takes. The capsule stays when you
-  pause, and shows any app or browser tab that's playing, even ones the app doesn't recognise.
+- **Tap a speaker** in the room to hear a test sound on it.
+- **The four choices at the bottom** each open a short list in plain words; the small print under each says
+  what it sets (the SBX profile, an effect, the equaliser).
+- **Point at the game monitor** for its buttons: previous and next picture, play or stop the trailer, its
+  sound, full screen. In full screen the pictures change every 10 seconds; the arrow keys move between them,
+  and Esc goes back. A trailer that's playing keeps playing between the two.
+- **Click the readout** at the bottom right to see each step the sound takes.
+- **☰ at the bottom right** opens the control centre on the tab you used last; **Done**, Esc or a click
+  outside closes it. Its **The Strip** button switches to the thin row.
+- **Look and feel** (in ☰) picks the theme, the layout, which compact view small windows show, the Remote's top
+  picture and the Strip's pin.
+- **The window buttons** fade in at the top right when you point there; drag any empty part of the page to
+  move the window.
 - **Speakers ↔ headphones always asks first**, so you never switch by accident.
 - When a game or app plays again, your last **profile and EQ for it come back**, with an Undo.
 
 ## Privacy and safety
 
 - **No AI, no telemetry, no accounts.** Everything runs locally.
-- The only network use: **MusicBrainz** (artist name only, once per artist, cached; can be switched off) to
-  match the Music EQ to a song's genre, and downloading the **cover art** the player itself reports.
+- For the page's pictures and details, only names (the artist, the album, the game, the film) and Steam's game
+  number are sent. Everything fetched is kept under `~/.cache/sbcommand`, so each one is asked about once
+  (renewed after 30 days):
+  - **MusicBrainz**: the artist's genre, to match the Music EQ (can be switched off), and the artist's other
+    albums for the record shelf, with covers from the **Cover Art Archive**;
+  - **TheAudioDB**: artist photos, logo and a short bio;
+  - **Steam**: a game's art from Steam's own files first, then its store page (screenshots, trailer). Trailers are
+    saved once with `ffmpeg` (the newest 12 are kept) and play **muted** on the monitor; sound only in full
+    screen or when you turn it on;
+  - **TMDB**: film and series pictures, only if you enter your own free API key;
+  - your **Playnite** library folder, if you set one (read from disk, no network);
+  - the **cover art** the player itself reports.
+- **Settings → Pictures and details → Look up pictures and details online** switches the page's lookups off;
+  it then uses the player's own cover art. The genre lookup has its own switch.
 - The **level meters** only *read* the card's output monitor while the window is open. Nothing is recorded or played.
 - The app never restarts PipeWire, pipewire-pulse or WirePlumber during normal use (that would cut sound
   in your browser). It only writes their config files when a setting really needs it.
@@ -235,8 +323,16 @@ Tips:
 | `media.rs` | Now playing: MPRIS metadata, stream format from PipeWire, Steam game names and artwork |
 | `genre.rs` | Song genre → Creative EQ preset (rules, no AI), with MusicBrainz lookups |
 | `meters.rs` | Live per-speaker levels from the card's monitor (`parec`) |
-| `room.rs`, `dash.rs` | The custom-drawn room, knobs, LED meters, EQ curve and signal-path dots (cairo) |
-| `ui.rs` | The GTK 4 / libadwaita window |
+| `meta.rs` | What kind of thing is playing (studio song, live recording, film, series, game, match, web video) and its pictures and details: TheAudioDB, Steam, MusicBrainz and the Cover Art Archive, TMDB, Playnite; cached |
+| `art.rs` | Picture processing: the page-red print, auto levels for dark game art, darkening |
+| `stage.rs` | The page's layers: background pictures, the room, the title block, the corner, the cover, the sound choices (slim dock, rows, bar), the controls, the monitor video; sizes for smaller windows |
+| `ui/page.rs` | The page's behaviour: what's playing → title, credits, corner and choices; the monitor and full screen; Look and feel |
+| `oys.rs` | The Over your shoulder room (cairo) |
+| `themes.rs` | The Blueprint, Screenprint and Callouts rooms (cairo) |
+| `fonts.rs` | The bundled Anton, Archivo Narrow and Archivo fonts, for this app only |
+| `mini.rs` | The compact views: the Remote and Over your shoulder, mini (small windows; the mini's neon, LED wall and dot speakers), the Strip (one thin row) and its pin (a KWin script) |
+| `room.rs`, `dash.rs` | The speakers as real cabinets with LED meters (the Remote's room, the Strip's row), knobs, the EQ curve and signal-path dots (cairo) |
+| `ui.rs` | The GTK 4 / libadwaita window and its side panels |
 | `tray.rs` | The tray icon (StatusNotifierItem via `ksni`) |
 | `selftest.rs` | `sbcommand selftest`: clicks through every control and checks the settings follow |
 
@@ -249,7 +345,11 @@ cargo build --release
 ```
 
 `SBCOMMAND_DRYRUN=1` prints card writes instead of making them; `SBCOMMAND_CONFIG_DIR` points settings
-elsewhere. Screenshots like the ones above come from the app itself:
+elsewhere. A dry run looks nothing up online; `SBCOMMAND_META_LIVE=1` allows the picture lookups anyway (and a
+muted trailer), with `SBCOMMAND_DEMO_TITLE`, `SBCOMMAND_DEMO_ARTIST`, `SBCOMMAND_DEMO_ALBUM` and
+`SBCOMMAND_DEMO_NOART=1` to fake what's playing. `SBCOMMAND_TMDB_KEY` is another way to give a TMDB key.
+Screenshots like the ones above come from the app itself (`SBCOMMAND_SHOT_DELAY` in ms,
+`SBCOMMAND_SHOT_FULL=pictures|trailer` for the full-screen view):
 
 ```sh
 SBCOMMAND_DRYRUN=1 SBCOMMAND_CONFIG_DIR=/tmp/sbc SBCOMMAND_DEMO_MEDIA=music \
@@ -278,3 +378,4 @@ Contributions are welcome, especially tests on other CA0132 cards (Sound Blaster
 ## License
 
 [GPL-3.0-or-later](LICENSE). Copyright © 2026 the Sound Blaster Command for Linux contributors.
+The bundled Anton, Archivo Narrow and Archivo fonts in [`assets/fonts`](assets/fonts) are under the SIL Open Font License 1.1.

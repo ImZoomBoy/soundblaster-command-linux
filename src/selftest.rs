@@ -21,8 +21,14 @@ fn s(u: &Ui) -> std::cell::Ref<'_, Settings> {
     u.s.borrow()
 }
 
-fn act(u: &Ui, id: &str) -> gtk::ToggleButton {
-    u.act_btns.iter().find(|(i, _)| *i == id).unwrap().1.clone()
+/// The window's Ui itself (for what needs the shared handle).
+fn rc() -> std::rc::Rc<Ui> {
+    crate::ui::UI.with(|c| c.borrow().as_ref().and_then(|w| w.upgrade())).expect("the window")
+}
+
+/// Picks an activity, as the tray or the page would (the header's tabs are gone).
+fn pick(u: &Ui, id: &str) {
+    u.set_activity(id);
 }
 
 fn chip(u: &Ui, name: &str) -> Option<gtk::ToggleButton> {
@@ -55,24 +61,24 @@ fn steps() -> Vec<Step> {
     step!("Opens on Music with Creative's Music profile, nothing playing", |u: &Ui| {
         check(u.current_page() == "home", "a side panel is open")?;
         check(s(u).activity == "music" && s(u).cur_profile() == "Music", format!("{} {}", s(u).activity, s(u).cur_profile()))?;
-        check(act(u, "music").is_active() && chip(u, "Music").is_some_and(|b| b.is_active()), "Music not lit")?;
+        check(s(u).activity == "music" && chip(u, "Music").is_some_and(|b| b.is_active()), "Music not lit")?;
         check(u.np_kick.label() == "NOTHING PLAYING" && !u.capsule.is_visible(), "capsule should hide with nothing playing")
     });
     step!("Every activity, its profile chips, remembered", |u: &Ui| {
         for (a, _, _, _) in model::ACTIVITIES {
-            act(u, a).set_active(true);
+            pick(u, a);
             check(s(u).activity == a, format!("{a} didn't select"))?;
             for n in model::styles_for(a) {
                 chip(u, n).ok_or(format!("no {n} chip"))?.set_active(true);
                 check(s(u).cur_profile() == *n, n.to_string())?;
             }
         }
-        act(u, "game").set_active(true);
+        pick(u, "game");
         chip(u, "FPS").unwrap().set_active(true);
-        act(u, "music").set_active(true);
-        act(u, "game").set_active(true);
+        pick(u, "music");
+        pick(u, "game");
         check(s(u).cur_profile() == "FPS", "Game forgot FPS")?;
-        act(u, "music").set_active(true);
+        pick(u, "music");
         Ok(())
     });
     step!("SBX and Pure: Pure turns the SBX effects off and keeps the equaliser", |u: &Ui| {
@@ -98,12 +104,12 @@ fn steps() -> Vec<Step> {
         Ok(())
     });
     step!("Scout Mode only for games", |u: &Ui| {
-        act(u, "game").set_active(true);
+        pick(u, "game");
         check(u.scout_box.is_visible(), "Scout should show for games")?;
         u.scout_sw.set_active(true);
         check(s(u).scout, "Scout on")?;
         u.scout_sw.set_active(false);
-        act(u, "music").set_active(true);
+        pick(u, "music");
         check(!u.scout_box.is_visible() && !s(u).scout, "Scout should hide for music")
     });
     step!("Output only changes after asking", |u: &Ui| {
@@ -205,7 +211,7 @@ fn steps() -> Vec<Step> {
     });
     step!("Mixer: levels, Speaker boost, recording", |u: &Ui| {
         u.show_page("mixer");
-        check(u.current_page() == "mixer" && u.split.shows_sidebar(), "Mixer didn't open")?;
+        check(u.current_page() == "mixer" && u.panel_open(), "Mixer didn't open")?;
         check(u.mix_rows.borrow().len() == 6, "5.1 should show 6 faders")?;
         let row = u.mix_rows.borrow()[0].clone();
         row.2.set_value(-1.5);
@@ -282,7 +288,7 @@ fn steps() -> Vec<Step> {
         check(d.is_some(), "restore should ask first")?;
         d.unwrap().force_close();
         u.show_page("home");
-        check(!u.split.shows_sidebar() && u.tool_btns.iter().all(|(_, b)| !b.is_active()), "panel should close")
+        check(!u.panel_open(), "panel should close")
     });
     step!("Now playing and the signal path", |u: &Ui| {
         u.on_now_playing(Some(song()));
@@ -362,17 +368,147 @@ fn steps() -> Vec<Step> {
         x.set_activity("movie");
         x.save().map_err(|e| e.to_string())?;
         u.reload();
-        check(s(u).activity == "movie" && act(u, "movie").is_active(), "reload")?;
+        check(s(u).activity == "movie", "reload")?;
         u.set_activity("music");
         Ok(())
     });
     step!("Every page opens", |u: &Ui| {
         for (name, id) in [("mixer", "mixer"), ("crystalvoice", "crystalvoice"), ("mic", "crystalvoice"), ("speakers", "setup"),
-                           ("setup", "setup"), ("settings", "settings"), ("sbx", "home"), ("eq", "home"), ("home", "home")] {
+                           ("setup", "setup"), ("settings", "settings"), ("sbx", "sound"), ("eq", "sound"), ("sound", "sound"),
+                           ("look", "look"), ("home", "home")] {
             u.show_page(name);
             check(u.current_page() == id, format!("{name} didn't open"))?;
         }
         Ok(())
+    });
+    step!("The page: what's playing, the corner, the readout", |u: &Ui| {
+        u.on_now_playing(Some(song()));
+        check(u.stage.field_labels() == ["Where", "Room", "Tone", "Extras"], format!("music labels {:?}", u.stage.field_labels()))?;
+        check(u.stage.readout.label().starts_with("STEREO → "), format!("readout {}", u.stage.readout.label()))?;
+        let mut film = song();
+        film.activity = "movie";
+        film.kind = "Video".into();
+        film.app = "Jellyfin".into();
+        film.title = "Starfall".into();
+        film.stream = Some(StreamFmt { channels: 6, rate: 48000, format: "float32le".into(), map: String::new() });
+        u.on_now_playing(Some(film));
+        check(u.stage.field_labels() == ["Seat", "Venue", "Mix", "Extras"], format!("film labels {:?}", u.stage.field_labels()))?;
+        // 5.1 on six speakers shows "5.1", not "5.1 → 5.1".
+        check(u.stage.readout.label() == s(u).speaker_config, format!("5.1 readout {}", u.stage.readout.label()))?;
+        // A film gets the ticket band ("Admit one") in place of the big number.
+        check(u.stage.ticket_shown(), "the film's ticket band")?;
+        u.on_now_playing(Some(song()));
+        check(!u.stage.ticket_shown(), "no ticket band on a song")?;
+        Ok(())
+    });
+    step!("The page's sound choices change the real settings", |u: &Ui| {
+        u.set_activity("music");
+        u.on_now_playing(Some(song()));
+        u.page_pick("room:Concert");
+        check(s(u).cur_profile() == "Concert" && s(u).sbx_enabled, "Room → like a live show")?;
+        u.page_pick("room:off");
+        check(!s(u).sbx_enabled, "Room → untouched turns SBX off")?;
+        u.page_pick("room:Music");
+        check(s(u).sbx_enabled && s(u).cur_profile() == "Music", "Room → close, like the studio")?;
+        u.page_pick("tone:-1");
+        let (curve, _) = model::effective_eq(&s(u));
+        check(s(u).tone == -1 && curve[0] >= 2 && curve[9] <= -2, format!("Tone warmer {curve:?}"))?;
+        u.update_stage();
+        let shown = u.stage.field_values();
+        check(shown.get(2).is_some_and(|v| v == "a little warmer"), format!("the page shows the pick {shown:?}"))?;
+        u.page_pick("tone:0");
+        u.page_pick("where:rear");
+        check(s(u).stereo_on == "rear", "Where → all around you")?;
+        u.page_pick("where:front");
+        check(s(u).stereo_on == "front", "Where → in front of you")?;
+        let before = s(u).fx_of(&s(u).cur_profile()).dialog.0;
+        u.page_pick("extra:dialog");
+        check(s(u).fx_of(&s(u).cur_profile()).dialog.0 != before, "Extras → clearer voices")?;
+        u.page_pick("extra:dialog");
+        check(s(u).fx_of(&s(u).cur_profile()).dialog.0 == before, "Extras → clearer voices off again")
+    });
+    step!("Look and feel: layouts, per-kind defaults, the compact view", |u: &Ui| {
+        u.on_now_playing(Some(song()));
+        check(s(u).layout_for("music") == "slimbig" && s(u).layout_for("sport") == "slim", "the defaults")?;
+        // (The test song has no cover, so there's no big cover to see.)
+        let (dock, rows, bar, _, _) = u.stage.shows();
+        check(dock && !rows && !bar, format!("slim dock {:?}", u.stage.shows()))?;
+        u.s.borrow_mut().layout = "rows".into();
+        u.update_stage();
+        check(u.stage.shows().1 && !u.stage.shows().0, "rows")?;
+        u.s.borrow_mut().layout = "bar".into();
+        u.update_stage();
+        check(u.stage.shows().2, "sport-style bar")?;
+        check(s(u).layout_for("sport") == "bar" && s(u).layout_for("film") == "bar", "one layout for every page")?;
+        u.s.borrow_mut().layout = "split".into();
+        check(s(u).layout_for("film") == "rows" && s(u).layout_for("sport") == "slim", "split only for music")?;
+        u.s.borrow_mut().layout = "default".into();
+        u.s.borrow_mut().layout_defaults.insert("music".into(), "rows".into());
+        check(s(u).layout_for("music") == "rows" && s(u).layout_for("game") == "slimbig", "a saved default for music only")?;
+        u.s.borrow_mut().layout_defaults.clear();
+        u.s.borrow_mut().theme = "compact".into();
+        u.update_stage();
+        rc().on_window_size(u.win.width(), u.win.height());
+        check(u.layout_now().1 && u.views.visible_child_name().as_deref() == Some("remote"), "the Compact theme shows the Remote")?;
+        u.s.borrow_mut().theme = "oys".into();
+        u.update_stage();
+        rc().on_window_size(u.win.width(), u.win.height());
+        u.show_page("look");
+        check(u.look_page.first_child().is_some(), "the Look and feel panel has content")?;
+        u.show_page("home");
+        Ok(())
+    });
+    step!("The compact views: the Remote in a small window, the Strip in a thin one, the page again", |u: &Ui| {
+        u.on_now_playing(Some(song()));
+        let (w, h) = (u.win.width(), u.win.height());
+        check(u.views.visible_child_name().as_deref() == Some("page"), "a full-size window shows the page")?;
+        rc().on_window_size(400, 720);
+        check(u.views.visible_child_name().as_deref() == Some("remote"), "a small window shows the Remote")?;
+        check(u.stage.remote.tile_values().len() == 4, "the Remote's four tiles")?;
+        let before = s(u).cur_profile();
+        u.stage.remote.press_tile("room");
+        check(u.stage.remote.sheet_open(), "a tile opens its options")?;
+        u.stage.remote.press_option("Concert");
+        check(s(u).cur_profile() == "Concert" && !u.stage.remote.sheet_open(), format!("picking one changes the sound ({})", s(u).cur_profile()))?;
+        u.page_pick(&format!("room:{before}"));
+        rc().on_window_size(1240, 76);
+        check(u.views.visible_child_name().as_deref() == Some("strip") && u.views.measure(gtk::Orientation::Vertical, 1240).0 <= 76,
+              format!("a thin window is the Strip, 76 px or less ({:?})", u.views.measure(gtk::Orientation::Vertical, 1240)))?;
+        check(u.stage.strip.choice_words().len() == 4, "the Strip's four choices")?;
+        check(crate::room::row(None, 300.0, 64.0, &u.mini_room_state()).len() == 6, "the Strip's six cabinets")?;
+        rc().page_action("pin-on");
+        check(s(u).strip_pin, "the pin is remembered")?;
+        rc().page_action("pin-off");
+        rc().on_window_size(w, h);
+        check(u.views.visible_child_name().as_deref() == Some("page"), "back to the page")?;
+        // The control centre keeps one size whatever tab is shown or what's pressed in it.
+        u.show_page("sound");
+        let size = |u: &Ui| u.side_box_size();
+        let first = size(u);
+        let mut sizes = vec![];
+        for t in ["mixer", "crystalvoice", "setup", "look", "settings", "sound"] {
+            u.show_page(t);
+            sizes.push(size(u));
+        }
+        u.pure_btn.set_active(true);
+        sizes.push(size(u));
+        u.sbx_btn.set_active(true);
+        sizes.push(size(u));
+        check(sizes.iter().all(|s| *s == first), format!("the control centre keeps its size {first:?} {sizes:?}"))?;
+        u.close_panel();
+        check(!u.panel_open(), "Done closes it")?;
+        // Over your shoulder, mini instead of the Remote, when picked.
+        u.s.borrow_mut().compact_view = "mini".into();
+        rc().on_window_size(440, 720);
+        check(u.views.visible_child_name().as_deref() == Some("mini") && u.stage.shoulder.row_values().len() == 4, "the mini in a small window, four rows")?;
+        u.stage.shoulder.press_row("tone");
+        check(u.stage.shoulder.sheet_open(), "a row opens its options")?;
+        u.stage.shoulder.press_option("-1");
+        check(s(u).tone == -1 && !u.stage.shoulder.sheet_open(), "picking one changes the sound")?;
+        u.page_pick("tone:0");
+        u.s.borrow_mut().compact_view = "remote".into();
+        rc().on_window_size(w, h);
+        check(u.views.visible_child_name().as_deref() == Some("page"), "and back")
     });
     step!("The window keeps its size: every profile, Pure, stereo option, volume and a long title", |u: &Ui| {
         // The right-hand column takes the width it asks for (the room gets the
@@ -391,7 +527,7 @@ fn steps() -> Vec<Step> {
         let mut seen: Vec<(String, i32)> = vec![("start".into(), width(u))];
         u.stereo_btns.iter().find(|(i, _)| *i == "rear").unwrap().1.set_active(true);
         for (a, _, _, _) in model::ACTIVITIES {
-            act(u, a).set_active(true);
+            pick(u, a);
             for n in model::styles_for(a) {
                 chip(u, n).ok_or(format!("no {n} chip"))?.set_active(true);
                 seen.push((format!("{a}/{n} + rears"), width(u)));
@@ -399,13 +535,13 @@ fn steps() -> Vec<Step> {
         }
         u.stereo_btns.iter().find(|(i, _)| *i == "front").unwrap().1.set_active(true);
         for (a, _, _, _) in model::ACTIVITIES {
-            act(u, a).set_active(true);
+            pick(u, a);
             for n in model::styles_for(a) {
                 chip(u, n).ok_or(format!("no {n} chip"))?.set_active(true);
                 seen.push((format!("{a}/{n}"), width(u)));
             }
         }
-        act(u, "music").set_active(true);
+        pick(u, "music");
         u.pure_btn.set_active(true);
         seen.push(("Pure".into(), width(u)));
         u.sbx_btn.set_active(true);

@@ -9,17 +9,24 @@
 //!   sbcommand watch    keep the card on its saved settings (sbcommand-watch.service)
 //!   sbcommand selftest click every control and check the results (no hardware changes)
 
+mod art;
 mod card;
 mod dash;
 mod detect;
+mod fonts;
 mod genre;
 mod room;
 mod media;
+mod meta;
 mod meters;
+mod mini;
+mod oys;
 mod tray;
 mod model;
 mod selftest;
+mod stage;
 mod system;
+mod themes;
 mod ui;
 mod worker;
 
@@ -99,8 +106,26 @@ progressbar.pink progress { background: #ff416c; }
 .pdot.changed { background: #ffb347; box-shadow: 0 0 6px #ffb347; }
 .pdot.enhanced { background: #ff416c; box-shadow: 0 0 6px #ff416c; }
 .pline { min-width: 2px; min-height: 22px; background: alpha(white, 0.16); }
-.side { background: #18181c; border-left: 1px solid alpha(white, 0.08); }
-.side-title { font-size: 17px; font-weight: 800; }
+.side, .cc { background: #0d0d0e; }
+.cc { border: 1px solid alpha(white, 0.12); border-radius: 18px; box-shadow: 0 24px 70px alpha(black, 0.85); }
+.cc-scrim { background: alpha(black, 0.38); border: none; border-radius: 0; box-shadow: none; }
+.cc-ro { font-family: "Anton"; font-size: 30px; color: white; line-height: 32px; }
+.cc-sub { font-size: 12px; color: alpha(white, 0.6); }
+.cc-tabs button { border-radius: 999px; padding: 6px 14px; min-height: 0; background: none; box-shadow: none; font-weight: 700; font-size: 13px; color: alpha(white, 0.62); }
+.cc-tabs button:hover { background: alpha(white, 0.06); color: white; }
+.cc-tabs button:checked { background: white; color: black; }
+.cc separator { background: alpha(white, 0.08); min-height: 1px; }
+.cc preferencesgroup .header label.description { color: alpha(white, 0.55); }
+.cc list.boxed-list, .cc .boxed-list { background: alpha(white, 0.035); border: 1px solid alpha(white, 0.07); box-shadow: none; border-radius: 12px; }
+.cc row:hover { background: alpha(white, 0.04); }
+.cc .panel { background: alpha(white, 0.03); }
+.cc switch:checked { background: #e3262f; }
+.side-title { font-family: "Anton"; font-size: 28px; font-weight: 400; letter-spacing: 0.3px; }
+.side preferencesgroup .header label.description { color: alpha(white, 0.55); }
+.side list.boxed-list, .side .boxed-list { background: alpha(white, 0.035); border: 1px solid alpha(white, 0.07); box-shadow: none; border-radius: 12px; }
+.side row:hover { background: alpha(white, 0.04); }
+.side .panel { background: alpha(white, 0.03); }
+.side switch:checked { background: #e3262f; }
 .desk { border-radius: 14px; padding: 14px 10px; background: alpha(black, 0.25); border: 1px solid alpha(white, 0.07); }
 .strip-val { font-weight: 700; font-size: 11px; font-feature-settings: "tnum"; }
 .strip-name { font-size: 10.5px; color: alpha(white, 0.6); }
@@ -157,11 +182,11 @@ fn main() -> glib::ExitCode {
             gui(None, true)
         }
         "" | "home" | "effects" | "compare" | "sbx" | "crystalvoice" | "mic" | "recording" | "scout" | "speakers" | "playback"
-        | "setup" | "mixer" | "eq" | "tone" | "settings" => {
+        | "setup" | "mixer" | "eq" | "tone" | "settings" | "sound" | "look" => {
             gui((!arg.is_empty()).then_some(arg), false)
         }
         "-h" | "--help" | "help" => {
-            println!("usage: sbcommand [sbx|crystalvoice|scout|speakers|mixer|eq|settings|apply|watch|selftest]");
+            println!("usage: sbcommand [sound|look|crystalvoice|scout|speakers|mixer|eq|settings|apply|watch|selftest]");
             glib::ExitCode::SUCCESS
         }
         other => {
@@ -172,13 +197,14 @@ fn main() -> glib::ExitCode {
 }
 
 fn gui(page: Option<String>, selftest: bool) -> glib::ExitCode {
+    fonts::register();
     let separate = selftest || std::env::var_os("SBCOMMAND_SHOT").is_some();
     let flags = if separate { gtk::gio::ApplicationFlags::NON_UNIQUE } else { Default::default() };
     let app = adw::Application::builder().application_id(APP_ID).flags(flags).build();
     app.connect_startup(|_| {
         adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
         let css = gtk::CssProvider::new();
-        css.load_from_string(CSS);
+        css.load_from_string(&format!("{CSS}\n{}\n{}", stage::CSS, mini::CSS));
         if let Some(display) = gtk::gdk::Display::default() {
             gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
         }
@@ -210,13 +236,15 @@ fn gui(page: Option<String>, selftest: bool) -> glib::ExitCode {
             let (w, h) = v.split_once('x')?;
             Some((w.parse().ok()?, h.parse().ok()?))
         }) {
+            // A thin size is the Strip: switched to first, so the window may be that thin.
+            if h < 150 { ui.set_strip(true) }
             ui.win.set_default_size(w, h);
         }
         ui.win.present();
         // Keep the UI alive for as long as the window is open.
         let keep = ui.clone();
         ui.win.connect_close_request(move |_| {
-            let _ = &keep;
+            keep.stop_video();
             glib::Propagation::Proceed
         });
         if selftest {
@@ -232,29 +260,55 @@ fn gui(page: Option<String>, selftest: bool) -> glib::ExitCode {
                     let p = p.clone();
                     glib::timeout_add_local_once(Duration::from_millis(1200), move || p.popup());
                 }
-            glib::timeout_add_local_once(Duration::from_millis(2200), move || {
+            let delay = std::env::var("SBCOMMAND_SHOT_DELAY").ok().and_then(|v| v.parse().ok()).unwrap_or(2200);
+            glib::timeout_add_local_once(Duration::from_millis(delay), move || {
                 if let (Ok(pp), Some(p)) = (std::env::var("SBCOMMAND_SHOT_PATH"), &path_pop) {
                     screenshot(p, &pp);
                 }
-                screenshot(&win, &path);
-                app.quit();
+                // A frame with a layout still pending draws nothing (a video
+                // that just started changes size): try again on later frames.
+                let tries = std::cell::Cell::new(0);
+                glib::timeout_add_local(Duration::from_millis(120), move || {
+                    tries.set(tries.get() + 1);
+                    if !screenshot(&win, &path) && tries.get() < 25 {
+                        return glib::ControlFlow::Continue;
+                    }
+                    // Stop any video first: GStreamer's GL thread can crash on exit mid-video.
+                    if let Some(u) = ui::UI.with(|c| c.borrow().as_ref().and_then(|w| w.upgrade())) {
+                        u.stop_video();
+                    }
+                    app.quit();
+                    glib::ControlFlow::Break
+                });
             });
+            if let Ok(how) = std::env::var("SBCOMMAND_SHOT_FULL") {
+                let wk = Rc::downgrade(&ui);
+                glib::timeout_add_local_once(Duration::from_millis(delay.saturating_sub(2500)), move || {
+                    if let Some(u) = wk.upgrade() {
+                        u.open_full(how == "trailer");
+                    }
+                });
+            }
         }
     });
     app.run_with_args::<&str>(&[])
 }
 
 /// Renders the window to a PNG (used for checking the layout without a screen).
-pub fn screenshot(win: &impl IsA<gtk::Widget>, path: &str) {
+pub fn screenshot(win: &impl IsA<gtk::Widget>, path: &str) -> bool {
     let win = win.as_ref();
     let (w, h) = (win.width() as f64, win.height() as f64);
     let paintable = gtk::WidgetPaintable::new(Some(win));
     let snap = gtk::Snapshot::new();
     paintable.snapshot(&snap, w, h);
-    if let (Some(node), Some(renderer)) = (snap.to_node(), win.native().and_then(|n| n.renderer())) {
-        let tex = renderer.render_texture(&node, None);
-        if let Err(e) = tex.save_to_png(path) {
-            eprintln!("sbcommand: screenshot failed: {e}");
+    match (snap.to_node(), win.native().and_then(|n| n.renderer())) {
+        (Some(node), Some(renderer)) => {
+            let tex = renderer.render_texture(&node, None);
+            if let Err(e) = tex.save_to_png(path) {
+                eprintln!("sbcommand: screenshot failed: {e}");
+            }
+            true
         }
+        _ => false,
     }
 }

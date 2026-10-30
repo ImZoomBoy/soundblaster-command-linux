@@ -302,6 +302,18 @@ fn demo(d: Option<&Detection>) -> Option<NowPlaying> {
         _ => "music",
     });
     let art = std::env::var("SBCOMMAND_DEMO_ART").ok().map(PathBuf::from).filter(|p| p.exists());
+    let mut np = demo_item(act, art)?;
+    // Real names for screenshots with real pictures (SBCOMMAND_META_LIVE).
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    if let Some(v) = env("SBCOMMAND_DEMO_TITLE") { np.title = v; }
+    if let Some(v) = env("SBCOMMAND_DEMO_ARTIST") { np.artist = v; }
+    if let Some(v) = env("SBCOMMAND_DEMO_ALBUM") { np.album = v; }
+    if let Some(v) = env("SBCOMMAND_DEMO_APP") { np.app = v; }
+    if env("SBCOMMAND_DEMO_NOART").is_some() { np.art = None; }
+    Some(np)
+}
+
+fn demo_item(act: &str, art: Option<PathBuf>) -> Option<NowPlaying> {
     Some(match act {
         "movie" => NowPlaying { kind: "Video".into(), activity: "movie", app: "Jellyfin".into(), title: "Starfall".into(),
             artist: "2025".into(), album: String::new(), extra: String::new(), art, length: Some(9960.0), position: Some(3912.0),

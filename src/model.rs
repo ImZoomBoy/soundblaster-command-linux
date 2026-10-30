@@ -356,6 +356,85 @@ pub struct Settings {
     pub tray: bool,
     /// With 5.1 speakers, where stereo plays: "front" or "rear" (see STEREO_ON).
     pub stereo_on: String,
+    /// Look and feel: the room's theme ("oys" Over your shoulder, "blueprint",
+    /// "screenprint", "callouts") or "compact", the smaller view.
+    pub theme: String,
+    /// Look and feel: one layout for every page, or "default" so each kind of
+    /// page uses its own (see LAYOUT_DEFAULTS and `layout_defaults`).
+    pub layout: String,
+    /// Each kind of page's own default layout, when changed from LAYOUT_DEFAULTS.
+    pub layout_defaults: BTreeMap<String, String>,
+    /// The Remote (the compact view): the top shows the artist photo printed in
+    /// red ("photo") or the album art whole ("album").
+    pub compact_top: String,
+    /// The Strip stays above other windows, on every desktop (a KWin script).
+    pub strip_pin: bool,
+    /// What small windows show: "remote" (the tall card) or "mini" (Over your
+    /// shoulder, mini: the main page made tall).
+    pub compact_view: String,
+    /// Tone: -2 much warmer .. 0 as mixed .. +2 much brighter, on top of the EQ.
+    pub tone: i32,
+    /// Look up pictures, logos and details online (TheAudioDB, Steam, TMDB).
+    pub pictures_online: bool,
+    /// Optional TMDB API key for film and TV pictures (free from themoviedb.org).
+    pub tmdb_key: String,
+    /// Playnite's library folder (game art and saved trailers), if you use it.
+    pub playnite_dir: String,
+}
+
+/// The kinds of page and what each opens with (the user's choices, 2026-10-29).
+pub const LAYOUT_DEFAULTS: [(&str, &str); 7] = [
+    ("music", "slimbig"), ("film", "slimbig"), ("tv", "slimbig"), ("game", "slimbig"),
+    ("sport", "slim"), ("video", "slim"), ("stream", "slim"),
+];
+
+/// Layouts: (id, name, what it is). Split pages are for music only; sport,
+/// online video and streams take the slim dock or their own bar.
+pub const LAYOUTS: [(&str, &str, &str); 7] = [
+    ("slim", "Slim dock", "The sound choices on one line in the bottom dock; the cover by the title."),
+    ("slimbig", "Slim dock, big cover", "The sound choices on one line in the bottom dock; the cover large at the bottom left."),
+    ("rows", "Rows", "The sound choices as rows at the bottom left, with the cover beside them."),
+    ("rowstitle", "Rows, cover by the title", "The sound choices as rows at the bottom left; the cover by the title."),
+    ("bar", "Sport-style bar", "The broadcast bar across the bottom, as on sport pages."),
+    ("split", "Split page, rows", "Music: the album cover fills the left half, with the rows over it."),
+    ("splitslim", "Split page, slim dock", "Music: the album cover fills the left half; the sound choices in the dock."),
+];
+
+/// Themes for the room: (id, name).
+pub const THEMES: [(&str, &str); 5] = [
+    ("oys", "Over your shoulder"), ("blueprint", "Blueprint"), ("screenprint", "Screenprint"),
+    ("callouts", "Callouts"), ("compact", "Compact"),
+];
+
+/// What the tone choice adds to each EQ band (dB) for one step warmer;
+/// brighter is the mirror image. Two steps double it.
+pub const TONE_WARMER: [i32; 10] = [2, 2, 1, 1, 0, 0, 0, -1, -1, -2];
+
+impl Settings {
+    /// The layout a kind of page uses ("music", "film", "tv", "game", "sport", "video", "stream").
+    pub fn layout_for(&self, kind: &str) -> String {
+        let own = self.layout_defaults.get(kind).cloned()
+            .unwrap_or_else(|| LAYOUT_DEFAULTS.iter().find(|x| x.0 == kind).map_or("slim", |x| x.1).to_string());
+        let pick = if self.layout.is_empty() || self.layout == "default" { own.clone() } else { self.layout.clone() };
+        fit_layout(kind, &pick, &own)
+    }
+}
+
+/// A layout that suits the kind of page: split pages only for music; sport,
+/// video and streams only take the slim dock or their bar.
+pub fn fit_layout(kind: &str, pick: &str, own: &str) -> String {
+    let bar_page = matches!(kind, "sport" | "video" | "stream");
+    let ok = |l: &str| if bar_page { l == "slim" || l == "bar" } else if kind == "music" { true } else { !l.starts_with("split") };
+    if ok(pick) {
+        return pick.into();
+    }
+    let near = match pick {
+        "slimbig" | "splitslim" => "slim",
+        "split" => if bar_page { "slim" } else { "rows" },
+        "rows" | "rowstitle" if bar_page => "bar",
+        _ => "",
+    };
+    if !near.is_empty() && ok(near) { near.into() } else if ok(own) { own.into() } else { "slim".into() }
 }
 
 /// (id, button label, what it means) for where stereo plays on 5.1 speakers.
@@ -542,6 +621,16 @@ impl Default for Settings {
             app_memory: BTreeMap::new(),
             tray: true,
             stereo_on: "front".into(),
+            theme: "oys".into(),
+            layout: "default".into(),
+            layout_defaults: BTreeMap::new(),
+            compact_top: "photo".into(),
+            strip_pin: false,
+            compact_view: "remote".into(),
+            tone: 0,
+            pictures_online: true,
+            tmdb_key: String::new(),
+            playnite_dir: String::new(),
         }
     }
 }
@@ -962,8 +1051,12 @@ pub fn effective_eq(s: &Settings) -> (Vec<i32>, bool) {
         vec![0; 10]
     };
     let boost = if s.sbx_active() { bass_boost(s) } else { vec![0.0; 10] };
-    let curve: Vec<i32> = base.iter().zip(&boost).map(|(b, x)| (*b as f64 + x).round() as i32).collect();
-    let on = (s.scout && s.sbx_active()) || s.eq_enabled || boost.iter().any(|x| *x != 0.0);
+    // Tone: warmer or brighter on top of the preset (not while Scout's EQ runs).
+    let tone = if s.scout && s.sbx_active() { 0 } else { s.tone.clamp(-2, 2) };
+    let tilt = |i: usize| -tone * TONE_WARMER[i];
+    let curve: Vec<i32> = base.iter().zip(&boost).enumerate()
+        .map(|(i, (b, x))| ((*b + tilt(i)) as f64 + x).round() as i32).collect();
+    let on = (s.scout && s.sbx_active()) || s.eq_enabled || tone != 0 || boost.iter().any(|x| *x != 0.0);
     (curve, on)
 }
 
@@ -1034,6 +1127,33 @@ pub fn profile_about(name: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn layouts_fit_each_kind_of_page() {
+        let mut s = Settings::default();
+        assert_eq!((s.layout_for("music"), s.layout_for("game"), s.layout_for("sport")), ("slimbig".into(), "slimbig".into(), "slim".into()));
+        s.layout = "split".into();
+        assert_eq!((s.layout_for("music"), s.layout_for("film"), s.layout_for("video")), ("split".into(), "rows".into(), "slim".into()));
+        s.layout = "rows".into();
+        assert_eq!(s.layout_for("sport"), "bar");
+        s.layout = "default".into();
+        s.layout_defaults.insert("game".into(), "bar".into());
+        assert_eq!((s.layout_for("game"), s.layout_for("music")), ("bar".into(), "slimbig".into()));
+    }
+
+    #[test]
+    fn tone_tilts_the_equaliser() {
+        let mut s = Settings::default();
+        s.eq_enabled = true;
+        s.sbx_enabled = false;
+        let flat = effective_eq(&s).0;
+        s.tone = -1;
+        let warm = effective_eq(&s).0;
+        assert!(warm[0] > flat[0] && warm[9] < flat[9]);
+        s.tone = 2;
+        let bright = effective_eq(&s).0;
+        assert!(bright[0] < flat[0] && bright[9] > flat[9] + 3);
+    }
+
     use super::*;
 
     #[test]

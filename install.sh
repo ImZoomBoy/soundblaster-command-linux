@@ -7,11 +7,12 @@ cd "$(dirname "$0")"
 BIN="$HOME/.local/bin"
 APPS="$HOME/.local/share/applications"
 ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
+SYMBOLIC="$HOME/.local/share/icons/hicolor/symbolic/apps"
 UNITS="$HOME/.config/systemd/user"
 
 if [ "${1:-}" = "--uninstall" ]; then
   systemctl --user disable --now sbcommand-watch.service 2>/dev/null || true
-  rm -f "$BIN/sbcommand" "$APPS/sbcommand.desktop" "$ICONS/com.local.sbcommand.svg" "$UNITS/sbcommand-watch.service"
+  rm -f "$BIN/sbcommand" "$APPS/sbcommand.desktop" "$ICONS/com.local.sbcommand.svg" "$SYMBOLIC/com.local.sbcommand-symbolic.svg" "$UNITS/sbcommand-watch.service"
   systemctl --user daemon-reload
   echo "Removed. Your settings are kept in ~/.config/sbcommand (delete it to remove them too)."
   exit 0
@@ -23,6 +24,7 @@ install -Dm755 target/release/sbcommand "$BIN/sbcommand"
 install -Dm644 packaging/sbcommand.desktop "$APPS/sbcommand.desktop"
 sed -i "s|^Exec=sbcommand|Exec=$BIN/sbcommand|" "$APPS/sbcommand.desktop"
 install -Dm644 packaging/com.local.sbcommand.svg "$ICONS/com.local.sbcommand.svg"
+install -Dm644 packaging/com.local.sbcommand-symbolic.svg "$SYMBOLIC/com.local.sbcommand-symbolic.svg"
 install -Dm644 packaging/sbcommand-watch.service "$UNITS/sbcommand-watch.service"
 systemctl --user daemon-reload
 systemctl --user enable --now sbcommand-watch.service

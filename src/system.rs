@@ -33,6 +33,19 @@ pub(crate) fn run(cmd: &str, args: &[&str]) -> Option<String> {
         eprintln!("dry-run: {cmd} {}", args.join(" "));
         return Some(String::new());
     }
+    run_now(cmd, args)
+}
+
+/// For picture lookups: like `run`, but in a dry run it still runs when
+/// SBCOMMAND_META_LIVE is set (screenshots with real pictures; never touches the card).
+pub(crate) fn run_net(cmd: &str, args: &[&str]) -> Option<String> {
+    if card::dry_run() && std::env::var_os("SBCOMMAND_META_LIVE").is_some() {
+        return run_now(cmd, args);
+    }
+    run(cmd, args)
+}
+
+fn run_now(cmd: &str, args: &[&str]) -> Option<String> {
     let mut child = Command::new(cmd)
         .args(args)
         .stdin(Stdio::null())

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Usage: dev/isolated-kwin.sh "<command>"
-# Runs a command in a private virtual KWin (1400x1000), fully apart from the desktop:
+# Runs a command in a private virtual KWin (1400x1000, or SBTEST_W x SBTEST_H), fully apart from the desktop:
 # a private D-Bus that cannot start services, private config/data/cache
 # folders, and no access to the real screen. Use it for every GUI test.
 T=$(mktemp -d /tmp/sbtest-xdg.XXXXXX)
@@ -11,7 +11,7 @@ env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS \
   XDG_DATA_DIRS="$HOME/.local/share:/usr/local/share:/usr/share" \
   GDK_DEBUG=no-portals GIO_USE_VFS=local GTK_A11Y=none NO_AT_BRIDGE=1 \
   dbus-run-session --config-file="$(cd "$(dirname "$0")" && pwd)/isolated-bus.conf" -- \
-  kwin_wayland --virtual --no-lockscreen --socket sbtest-wl --width 1400 --height 1000 --exit-with-session "$*"
+  kwin_wayland --virtual --no-lockscreen --socket sbtest-wl --width "${SBTEST_W:-1400}" --height "${SBTEST_H:-1000}" --exit-with-session "$*"
 rc=$?
 rm -rf "$T"
 exit $rc

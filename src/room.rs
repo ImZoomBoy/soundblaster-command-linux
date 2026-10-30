@@ -28,6 +28,11 @@ pub struct RoomState {
     pub bottom: f64,
     /// Note under a silent speaker, e.g. "off in 2.1".
     pub off_note: &'static str,
+    /// The speakers' size range and the least height the room plans for: the
+    /// room card used 0.7..1.35 and 200 px; the compact Remote's room is smaller.
+    pub kmin: f64,
+    pub kmax: f64,
+    pub min_avail: f64,
 }
 
 pub struct Geometry {
@@ -39,8 +44,8 @@ pub struct Geometry {
 }
 
 pub fn geometry(w: f64, h: f64, st: &RoomState) -> Geometry {
-    let avail = (h - st.top - st.bottom).max(200.0);
-    let k = (avail / 430.0).min(w / 640.0).clamp(0.7, 1.35);
+    let avail = (h - st.top - st.bottom).max(st.min_avail);
+    let k = (avail / 430.0).min(w / 640.0).clamp(st.kmin, st.kmax);
     Geometry { cx: w / 2.0, cy: st.top + avail * 0.52, rx: (w * 0.39).min(avail * 0.95), ry: avail * 0.36, k }
 }
 
@@ -226,72 +231,107 @@ pub fn draw(cr: &Context, w: f64, h: f64, st: &RoomState) {
         let (c, name, d) = SPEAKERS[i];
         let (x, y) = pos(&g, d);
         let s = k * (0.82 + 0.36 * ((y - (g.cy - g.ry)) / (2.0 * g.ry)));
-        let on = st.plays[i];
-        let lv = st.levels[i] as f64;
-        let (bw, bh) = match c { "LFE" => (78.0 * s, 74.0 * s), "FC" => (104.0 * s, 42.0 * s), _ => (48.0 * s, 74.0 * s) };
-        cr.push_group();
-        // Shadow
-        for j in 0..4 {
-            ellipse(cr, x, y + bh / 2.0 + 5.0 * s, bw * (0.72 + 0.05 * j as f64), 7.0 * s + j as f64);
-            cr.set_source_rgba(0.0, 0.0, 0.0, 0.14);
-            let _ = cr.fill();
-        }
-        if st.lit.as_deref() == Some(c) {
-            let hot = RadialGradient::new(x, y, 0.0, x, y, bw * 0.95);
-            hot.add_color_stop_rgba(0.0, PINK.0, PINK.1, PINK.2, 0.55);
-            hot.add_color_stop_rgba(1.0, PINK.0, PINK.1, PINK.2, 0.0);
-            cr.arc(x, y, bw * 0.95, 0.0, 2.0 * PI);
-            let _ = cr.set_source(&hot);
-            let _ = cr.fill();
-        }
-        let cab = LinearGradient::new(0.0, y - bh / 2.0, 0.0, y + bh / 2.0);
-        cab.add_color_stop_rgb(0.0, 0.235, 0.235, 0.26);
-        cab.add_color_stop_rgb(0.5, 0.145, 0.145, 0.165);
-        cab.add_color_stop_rgb(1.0, 0.094, 0.094, 0.11);
-        rrect(cr, x - bw / 2.0, y - bh / 2.0, bw, bh, 7.0 * s);
-        let _ = cr.set_source(&cab);
-        let _ = cr.fill_preserve();
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.12);
-        cr.set_line_width(1.0);
-        let _ = cr.stroke();
-        rrect(cr, x - bw / 2.0 + 1.0, y - bh / 2.0 + 1.0, bw - 2.0, 3.0 * s, 1.5 * s);
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.08);
+        let lit = st.lit.as_deref() == Some(c);
+        // Small rooms (the compact Remote) leave the names off: a tap still names the speaker.
+        let name = if k < 0.55 { "" } else { name };
+        cabinet(cr, c, x, y, s, st.plays[i], st.levels[i] as f64, lit, name, if st.plays[i] { "" } else { st.off_note }, k);
+    }
+}
+
+/// One cabinet, front on, centred at (x, y) and scaled by `s`: shadow, cabinet,
+/// woofer and tweeter, a glow when tested, the LED meter beside it when it plays,
+/// and its name under it (`name` empty: none). `k` sizes the name's type.
+#[allow(clippy::too_many_arguments)]
+pub fn cabinet(cr: &Context, c: &str, x: f64, y: f64, s: f64, on: bool, lv: f64, lit: bool, name: &str, note: &str, k: f64) {
+    let (bw, bh) = size(c, s);
+    cr.push_group();
+    // Shadow
+    for j in 0..4 {
+        ellipse(cr, x, y + bh / 2.0 + 5.0 * s, bw * (0.72 + 0.05 * j as f64), 7.0 * s + j as f64);
+        cr.set_source_rgba(0.0, 0.0, 0.0, 0.14);
         let _ = cr.fill();
-        let glow = on.then_some(lv);
-        match c {
-            "LFE" => woofer(cr, x, y + 3.0 * s, 24.0 * s, s, glow),
-            "FC" => {
-                woofer(cr, x - 30.0 * s, y, 13.0 * s, s, glow);
-                woofer(cr, x + 30.0 * s, y, 13.0 * s, s, glow);
-                tweeter(cr, x, y, s);
-            }
-            _ => {
-                tweeter(cr, x, y - bh * 0.29, s);
-                woofer(cr, x, y + bh * 0.12, 15.0 * s, s, glow);
-            }
+    }
+    if lit {
+        let hot = RadialGradient::new(x, y, 0.0, x, y, bw * 0.95);
+        hot.add_color_stop_rgba(0.0, PINK.0, PINK.1, PINK.2, 0.55);
+        hot.add_color_stop_rgba(1.0, PINK.0, PINK.1, PINK.2, 0.0);
+        cr.arc(x, y, bw * 0.95, 0.0, 2.0 * PI);
+        let _ = cr.set_source(&hot);
+        let _ = cr.fill();
+    }
+    let cab = LinearGradient::new(0.0, y - bh / 2.0, 0.0, y + bh / 2.0);
+    cab.add_color_stop_rgb(0.0, 0.235, 0.235, 0.26);
+    cab.add_color_stop_rgb(0.5, 0.145, 0.145, 0.165);
+    cab.add_color_stop_rgb(1.0, 0.094, 0.094, 0.11);
+    rrect(cr, x - bw / 2.0, y - bh / 2.0, bw, bh, 7.0 * s);
+    let _ = cr.set_source(&cab);
+    let _ = cr.fill_preserve();
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.12);
+    cr.set_line_width(1.0);
+    let _ = cr.stroke();
+    rrect(cr, x - bw / 2.0 + 1.0, y - bh / 2.0 + 1.0, bw - 2.0, 3.0 * s, 1.5 * s);
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.08);
+    let _ = cr.fill();
+    let glow = on.then_some(lv);
+    match c {
+        "LFE" => woofer(cr, x, y + 3.0 * s, 24.0 * s, s, glow),
+        "FC" => {
+            woofer(cr, x - 30.0 * s, y, 13.0 * s, s, glow);
+            woofer(cr, x + 30.0 * s, y, 13.0 * s, s, glow);
+            tweeter(cr, x, y, s);
         }
-        // LED meter beside the cabinet.
-        if on {
-            for j in 0..9 {
-                let lit = lv * 9.0 > j as f64 + 0.3;
-                let col = if !lit { (1.0, 1.0, 1.0, 0.07) } else if j >= 7 { (1.0, 0.70, 0.28, 1.0) }
-                          else if j >= 5 { (PINK.0, PINK.1, PINK.2, 1.0) } else { (0.78, 0.06, 0.18, 1.0) };
-                rrect(cr, x + bw / 2.0 + 6.0 * s, y + bh / 2.0 - (j + 1) as f64 * (bh / 9.2), 4.0 * s, bh / 9.2 - 1.6, 1.0);
-                cr.set_source_rgba(col.0, col.1, col.2, col.3);
-                let _ = cr.fill();
-            }
+        _ => {
+            tweeter(cr, x, y - bh * 0.29, s);
+            woofer(cr, x, y + bh * 0.12, 15.0 * s, s, glow);
         }
+    }
+    // LED meter beside the cabinet.
+    if on {
+        for j in 0..9 {
+            let lit = lv * 9.0 > j as f64 + 0.3;
+            let col = if !lit { (1.0, 1.0, 1.0, 0.07) } else if j >= 7 { (1.0, 0.70, 0.28, 1.0) }
+                      else if j >= 5 { (PINK.0, PINK.1, PINK.2, 1.0) } else { (0.78, 0.06, 0.18, 1.0) };
+            rrect(cr, x + bw / 2.0 + 6.0 * s, y + bh / 2.0 - (j + 1) as f64 * (bh / 9.2), 4.0 * s, bh / 9.2 - 1.6, 1.0);
+            cr.set_source_rgba(col.0, col.1, col.2, col.3);
+            let _ = cr.fill();
+        }
+    }
+    if !name.is_empty() {
+        cr.select_font_face("Sans", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Bold);
         cr.set_font_size(11.0 * k.min(1.15));
         cr.set_source_rgba(1.0, 1.0, 1.0, if on { 0.9 } else { 0.4 });
         text_centered(cr, name, x, y + bh / 2.0 + 21.0 * s);
-        if !on && !st.off_note.is_empty() {
+        if !on && !note.is_empty() {
             cr.select_font_face("Sans", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Normal);
             cr.set_font_size(9.5);
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.35);
-            text_centered(cr, st.off_note, x, y + bh / 2.0 + 34.0 * s);
-            cr.select_font_face("Sans", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Bold);
+            text_centered(cr, note, x, y + bh / 2.0 + 34.0 * s);
         }
-        let _ = cr.pop_group_to_source();
-        let _ = cr.paint_with_alpha(if on { 1.0 } else { 0.35 });
     }
+    let _ = cr.pop_group_to_source();
+    let _ = cr.paint_with_alpha(if on { 1.0 } else { 0.35 });
+}
+
+fn size(c: &str, s: f64) -> (f64, f64) {
+    match c { "LFE" => (78.0 * s, 74.0 * s), "FC" => (104.0 * s, 42.0 * s), _ => (48.0 * s, 74.0 * s) }
+}
+
+/// The six cabinets front on in one row (the Strip), filling `w` x `h`. Draws
+/// them when `cr` is given; returns each one's box, for tapping.
+pub fn row(cr: Option<&Context>, w: f64, h: f64, st: &RoomState) -> Vec<(&'static str, [f64; 4])> {
+    let s = ((h - 6.0) / 80.0).min((w - 16.0) / 478.0).max(0.2);
+    let widths: f64 = SPEAKERS.iter().map(|(c, _, _)| size(c, s).0 + 14.0 * s).sum();
+    let gap = ((w - 16.0 * s - widths) / 5.0).max(0.0);
+    let mut x = 8.0 * s;
+    let y = h * 0.46;
+    let mut out = vec![];
+    for (i, (c, _, _)) in SPEAKERS.iter().enumerate() {
+        let (bw, bh) = size(c, s);
+        if let Some(cr) = cr {
+            cabinet(cr, c, x + bw / 2.0, y, s, st.plays[i], st.levels[i] as f64, st.lit.as_deref() == Some(*c), "", "", s);
+        }
+        out.push((*c, [x - 4.0, y - bh / 2.0 - 4.0, bw + 18.0 * s, bh + 8.0]));
+        x += bw + 14.0 * s + gap;
+    }
+    out
 }

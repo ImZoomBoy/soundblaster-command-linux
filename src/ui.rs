@@ -11,6 +11,9 @@ use crate::model::{self, Settings, MIC_BOOST, SPEAKER_CONFIGS, SPEAKER_CONFIG_LA
                    SPEAKER_TYPE_LABELS, SVM_MODES, VOICE_MORPHS};
 use crate::room;
 use crate::worker::{part, Event, Job};
+use crate::stage;
+
+mod page;
 use adw::prelude::*;
 use gtk::{gio, glib};
 use std::cell::{Cell, RefCell};
@@ -64,10 +67,29 @@ pub struct Ui {
     banner: adw::Banner,
     pub spinner: adw::Spinner,
 
-    // ---- header
+    // ---- the window: the page, the Remote or the Strip; the window buttons
+    pub views: gtk::Stack,
+    wctl: gtk::Revealer,
+    sizer: gtk::DrawingArea,
+    /// The window's size before it became the Strip (to go back to).
+    full_size: Cell<(i32, i32)>,
+    /// The Strip was asked for (☰), not just a short window.
+    strip_on: Cell<bool>,
+    /// The control centre (☰): the panel, its dimmed backdrop, its tabs and head.
+    side_box: gtk::Box,
+    pub cc_rev: gtk::Revealer,
+    cc_scrim: gtk::Button,
+    pub cc_tabs: Vec<(&'static str, gtk::ToggleButton)>,
+    cc_ro: gtk::Label,
+    cc_sub: gtk::Label,
+    cc_tab_sw: gtk::ScrolledWindow,
+    // ---- (no header bar any more: these stay empty)
     pub act_btns: Vec<(&'static str, gtk::ToggleButton)>,
     pub tool_btns: Vec<(&'static str, gtk::ToggleButton)>,
-    pub split: adw::OverlaySplitView,
+    pub stage: Rc<stage::Stage>,
+    pub root_ov: gtk::Overlay,
+    pub look_page: gtk::Box,
+    pub page: page::PageState,
     side_stack: gtk::Stack,
     side_title: gtk::Label,
 
@@ -234,10 +256,6 @@ fn button(label: &str) -> gtk::Button {
     gtk::Button::builder().label(label).valign(gtk::Align::Center).build()
 }
 
-fn icon_button(icon: &str, tip: &str) -> gtk::Button {
-    gtk::Button::builder().icon_name(icon).tooltip_text(tip).valign(gtk::Align::Center).css_classes(["flat", "circular"]).build()
-}
-
 /// Two or more toggle buttons that act as one choice.
 fn segmented(items: &[&str], red: bool) -> (gtk::Box, Vec<gtk::ToggleButton>) {
     let b = gtk::Box::builder().css_classes(if red { vec!["seg", "red"] } else { vec!["seg"] }).homogeneous(true).build();
@@ -355,44 +373,19 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
         .default_width(1240)
         .default_height(800)
         .build();
-    win.set_size_request(1040, 700);
+    // Small windows get the compact Remote and the Strip is 64 px tall (see
+    // mini.rs), so the window can be small; what it shows sets the real minimum.
+    win.set_size_request(360, 48);
     win.add_css_class("sbc");
     let toasts = adw::ToastOverlay::new();
 
-    // ================================================================ header
-    let brand = gtk::Box::builder().spacing(10).margin_start(4).build();
-    let bl = gtk::Label::new(None);
-    bl.set_markup("<b>Sound Blaster</b> <span alpha='60%'>Command</span>");
-    brand.append(&bl);
-    let tabs = gtk::Box::builder().spacing(2).build();
-    let mut act_btns: Vec<(&'static str, gtk::ToggleButton)> = Vec::new();
-    for (id, l, icon, hint) in model::ACTIVITIES {
-        let b = gtk::Box::builder().spacing(8).build();
-        b.append(&gtk::Image::from_icon_name(icon));
-        b.append(&gtk::Label::new(Some(l)));
-        let tb = gtk::ToggleButton::builder().child(&b).css_classes(["tab"]).tooltip_text(hint).build();
-        if let Some((_, f)) = act_btns.first() {
-            tb.set_group(Some(f));
-        }
-        tabs.append(&tb);
-        act_btns.push((id, tb));
-    }
-    let header = adw::HeaderBar::new();
-    header.pack_start(&brand);
-    header.set_title_widget(Some(&tabs));
+    // No header bar (the design never had one): the page fills the window, its
+    // ☰ menu at the bottom right holds every panel, and the window buttons
+    // appear at the top right when the pointer comes near (see below).
+    let act_btns: Vec<(&'static str, gtk::ToggleButton)> = Vec::new();
+    let tool_btns: Vec<(&'static str, gtk::ToggleButton)> = Vec::new();
     let spinner = adw::Spinner::new();
     spinner.set_visible(false);
-    let mut tool_btns: Vec<(&'static str, gtk::ToggleButton)> = Vec::new();
-    for (id, icon, tip) in [("settings", "emblem-system-symbolic", "Settings"),
-                            ("setup", "preferences-system-symbolic", "Speaker setup"),
-                            ("crystalvoice", "audio-input-microphone-symbolic", "CrystalVoice (microphone)"),
-                            ("mixer", "view-media-equalizer-symbolic", "Mixer")] {
-        let b = gtk::ToggleButton::builder().icon_name(icon).tooltip_text(tip).css_classes(["flat", "tool"]).build();
-        header.pack_end(&b);
-        tool_btns.push((id, b));
-    }
-    tool_btns.reverse();
-    header.pack_end(&spinner);
     let banner = adw::Banner::builder().title("The Sound Blaster isn't responding").button_label("Reset card").revealed(false).build();
 
     // ================================================================ the room and what's playing
@@ -583,13 +576,25 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     eq_card.append(&ehead);
     eq_card.append(&eq_view.area);
 
-    let right = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).width_request(500).hexpand(false).build();
+    // The detailed controls (output, SBX profile and its effects, the
+    // equaliser) live in the Sound panel; the page shows what's playing.
+    let right = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).build();
     right.append(&out_card);
     right.append(&profile_card);
     right.append(&eq_card);
-    let body = gtk::Box::builder().spacing(16).margin_start(16).margin_end(16).margin_bottom(16).margin_top(4).build();
-    body.append(&room_ov);
-    body.append(&right);
+    let _ = &room_ov;
+    let stage = stage::Stage::new(&vol_adj);
+    // The page, the Remote (small windows) or the Strip (a thin bar); each can
+    // be dragged by its empty parts to move the window.
+    // (No transition: while one runs, the view going away still counts towards the window's size.)
+    let views = gtk::Stack::builder().vhomogeneous(false).hhomogeneous(false).transition_type(gtk::StackTransitionType::None).build();
+    for (name, w) in [("page", stage.root.clone().upcast::<gtk::Widget>()), ("remote", stage.remote.root.clone().upcast()),
+                      ("strip", stage.strip.root.clone().upcast()), ("mini", stage.shoulder.root.clone().upcast())] {
+        let h = gtk::WindowHandle::builder().child(&w).build();
+        views.add_named(&h, Some(name));
+    }
+    let body = views.clone();
+    let look_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).build();
 
     // ================================================================ side panels
     // Mixer
@@ -707,40 +712,111 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     for w in [rr.upcast_ref::<gtk::Widget>(), rs.upcast_ref(), dfr.upcast_ref()] {
         g_q.add(w);
     }
+    // Pictures and details for the page
+    let pics_switch = switch("Look up pictures and details online", "Artist photos and logos (TheAudioDB), game art and trailers (Steam), film pictures (TMDB). Only names are sent.");
+    let tmdb_row = adw::PasswordEntryRow::builder().title("TMDB API key (optional, for film and TV pictures)").show_apply_button(true).build();
+    let playnite_row = adw::EntryRow::builder().title("Playnite library folder (optional, for game art and saved trailers)").show_apply_button(true).build();
+    let g_pics = group("Pictures and details", Some("What the page shows behind what's playing. Everything is kept in ~/.cache/sbcommand."));
+    for w in [pics_switch.upcast_ref::<gtk::Widget>(), tmdb_row.upcast_ref(), playnite_row.upcast_ref()] {
+        g_pics.add(w);
+    }
+    let look_row = adw::ActionRow::builder().title("Look and feel").subtitle("The room's theme, the page layout and your defaults").activatable(true).build();
+    look_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+    let g_view = group("The page", None);
+    g_view.add(&look_row);
+    let about = adw::ActionRow::builder().title(format!("Sound Blaster Command for Linux {}", env!("CARGO_PKG_VERSION")))
+        .subtitle("GPL-3.0-or-later · github.com/ImZoomBoy/soundblaster-command-linux · Anton and Archivo Narrow fonts: SIL Open Font License").build();
+    let g_about = group("About", None);
+    g_about.add(&about);
     let set_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).build();
     set_page.append(&g_auto);
+    set_page.append(&g_view);
+    set_page.append(&g_pics);
     set_page.append(&g_q);
+    set_page.append(&g_about);
+    {
+        let s0 = Settings::load();
+        pics_switch.set_active(s0.pictures_online);
+        tmdb_row.set_text(&s0.tmdb_key);
+        playnite_row.set_text(&s0.playnite_dir);
+    }
+    pics_switch.connect_active_notify(|r| with_ui(|u| { u.s.borrow_mut().pictures_online = r.is_active(); u.save_now(); }));
+    tmdb_row.connect_apply(|r| with_ui(|u| { u.s.borrow_mut().tmdb_key = r.text().trim().to_string(); u.save_now(); u.toast("Saved: film and TV pictures come from TMDB from the next film"); }));
+    playnite_row.connect_apply(|r| with_ui(|u| { u.s.borrow_mut().playnite_dir = r.text().trim().to_string(); u.save_now(); u.toast("Saved: Playnite's art is used from the next game"); }));
+    look_row.connect_activated(|_| with_ui(|u| u.show_page("look")));
 
-    let side_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).vhomogeneous(false).build();
+    // The control centre (☰): one panel above the dock, its size set by the
+    // window only. Every tab scrolls inside it, so nothing pressed in it can
+    // change its size.
+    let side_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).transition_duration(120)
+        .vhomogeneous(true).hhomogeneous(true).vexpand(true).build();
     for (id, w) in [("mixer", mix_page.upcast::<gtk::Widget>()), ("crystalvoice", cv_page.upcast()),
-                    ("setup", setup_page.upcast()), ("settings", set_page.upcast())] {
-        let sw = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
-        let inner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).margin_start(18).margin_end(18).margin_bottom(18).build();
+                    ("setup", setup_page.upcast()), ("settings", set_page.upcast()), ("sound", right.upcast()),
+                    ("look", look_page.clone().upcast())] {
+        // Sideways scrolling only when the window is narrower than the panel.
+        let sw = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Automatic).vexpand(true).build();
+        let inner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).margin_start(18).margin_end(18).margin_top(6).margin_bottom(18).build();
         inner.append(&w);
         sw.set_child(Some(&inner));
         side_stack.add_named(&sw, Some(id));
     }
     let side_title = label("", &["side-title"]);
-    side_title.set_hexpand(true);
-    let side_close = icon_button("window-close-symbolic", "Close");
-    let side_head = gtk::Box::builder().spacing(8).margin_start(18).margin_end(10).margin_top(14).margin_bottom(10).build();
-    side_head.append(&side_title);
+    // At the top: what plays and how (the readout, then SBX, the EQ and the song); Done closes it.
+    let cc_ro = label("", &["cc-ro"]);
+    let cc_sub = label("", &["cc-sub"]);
+    cc_sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    let cc_text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).build();
+    cc_text.append(&cc_ro);
+    cc_text.append(&cc_sub);
+    let side_close = gtk::Button::builder().label("Done").css_classes(["side-done"]).valign(gtk::Align::Center).tooltip_text("Close (Esc)").build();
+    let cc_strip = gtk::Button::builder().label("The Strip").css_classes(["side-done", "ghost"]).valign(gtk::Align::Center)
+        .tooltip_text("One thin row for the edge of a screen").build();
+    let side_head = gtk::Box::builder().spacing(8).margin_start(20).margin_end(14).margin_top(16).margin_bottom(12).build();
+    side_head.append(&cc_text);
+    side_head.append(&cc_strip);
     side_head.append(&side_close);
-    let side = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["side"]).build();
+    // The tabs: pills, one lit; they scroll sideways in a narrow window.
+    let cc_tab_box = gtk::Box::builder().spacing(4).margin_start(14).margin_end(14).margin_bottom(8).css_classes(["cc-tabs"]).build();
+    let mut cc_tabs: Vec<(&'static str, gtk::ToggleButton)> = Vec::new();
+    for (id, name) in [("sound", "Sound"), ("mixer", "Mixer"), ("crystalvoice", "Microphone"), ("setup", "Speakers"),
+                       ("look", "Look and feel"), ("settings", "Settings")] {
+        let b = gtk::ToggleButton::builder().label(name).build();
+        if let Some((_, f)) = cc_tabs.first() { b.set_group(Some(f)); }
+        cc_tab_box.append(&b);
+        cc_tabs.push((id, b));
+    }
+    let cc_tab_sw = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::External).vscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true).child(&cc_tab_box).build();
+    let side = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["cc"]).build();
     side.append(&side_head);
+    side.append(&cc_tab_sw);
+    side.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     side.append(&side_stack);
+    let cc_rev = gtk::Revealer::builder().child(&side).transition_type(gtk::RevealerTransitionType::Crossfade).transition_duration(160)
+        .halign(gtk::Align::End).valign(gtk::Align::End).margin_end(24).margin_bottom(84).reveal_child(false).build();
+    // The rest of the window dims while it's open; a click there closes it.
+    let cc_scrim = gtk::Button::builder().css_classes(["cc-scrim"]).hexpand(true).vexpand(true).visible(false).build();
 
-    let content = adw::ToolbarView::new();
-    content.add_top_bar(&header);
-    content.add_top_bar(&banner);
-    content.set_content(Some(&body));
-    let split = adw::OverlaySplitView::builder().sidebar_position(gtk::PackType::End).collapsed(true).show_sidebar(false)
-        .max_sidebar_width(460.0).min_sidebar_width(400.0).sidebar_width_fraction(0.36).build();
-    split.set_sidebar(Some(&side));
-    split.set_content(Some(&content));
-    toasts.set_child(Some(&split));
-    win.set_content(Some(&toasts));
-
+    // The page fills the window; the "isn't responding" banner lies over its top.
+    toasts.set_child(Some(&body));
+    // The full-screen pictures and trailer go over everything, inside this window.
+    let root_ov = gtk::Overlay::builder().child(&toasts).build();
+    win.set_content(Some(&root_ov));
+    root_ov.add_overlay(&cc_scrim);
+    root_ov.add_overlay(&cc_rev);
+    banner.set_valign(gtk::Align::Start);
+    root_ov.add_overlay(&banner);
+    // The window buttons fade in at the top right when the pointer comes near
+    // the top edge (with no header bar), with the busy spinner beside them.
+    let wbox = gtk::Box::builder().spacing(8).css_classes(["wctl"]).margin_top(8).margin_end(10).build();
+    wbox.append(&spinner);
+    wbox.append(&gtk::WindowControls::new(gtk::PackType::End));
+    let wctl = gtk::Revealer::builder().child(&wbox).transition_type(gtk::RevealerTransitionType::Crossfade).transition_duration(180)
+        .halign(gtk::Align::End).valign(gtk::Align::Start).reveal_child(false).build();
+    root_ov.add_overlay(&wctl);
+    // Follows the window's size whatever it shows (the page, the Remote or the Strip).
+    let sizer = gtk::DrawingArea::builder().hexpand(true).vexpand(true).can_target(false).build();
+    root_ov.add_overlay(&sizer);
     let stereo_btns: Vec<(&'static str, gtk::ToggleButton)> = model::STEREO_ON.iter().map(|x| x.0).zip(sbtns).collect();
     let ui = Rc::new(Ui {
         s: RefCell::new(s),
@@ -749,7 +825,8 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
         timers: RefCell::new(HashMap::new()),
         card_ok: Cell::new(true),
         win, toasts, banner, spinner,
-        act_btns, tool_btns, split, side_stack, side_title,
+        views, wctl, sizer, full_size: Cell::new((1240, 800)), strip_on: Cell::new(false), side_box: side.clone(), cc_rev, cc_scrim, cc_tabs, cc_ro, cc_sub, cc_tab_sw,
+        act_btns, tool_btns, side_stack, side_title, stage, root_ov, look_page, page: page::PageState::default(),
         room: room_da, room_lit: RefCell::new(None), levels: Cell::new([0.0; 6]), meter: RefCell::new(None), t0: Instant::now(),
         np_head, np_kick, np_title, np_sub, np_prog, capsule, cap_cover, cap_pic, cap_icon, cap_title, cap_artist, cap_time, cap_prog,
         path_dots, path_label, path_box, np: RefCell::new(None), np_at: Cell::new(Instant::now()), np_gone: Cell::new(None),
@@ -770,7 +847,8 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     });
     nr_val.set_visible(false);
     UI.with(|c| *c.borrow_mut() = Some(Rc::downgrade(&ui)));
-    connect(&ui, &side_close);
+    connect(&ui, &side_close, &cc_strip);
+    ui.connect_page();
     ui.refresh();
     ui.update_now_playing();
 
@@ -814,7 +892,7 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
 
 // ------------------------------------------------------------------ signals
 
-fn connect(ui: &Rc<Ui>, side_close: &gtk::Button) {
+fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
     // Room: draw, animate the ripples while sound plays, click a speaker to test it.
     {
         let wk = Rc::downgrade(ui);
@@ -874,26 +952,32 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button) {
             if b.is_active() {
                 u.show_page(id);
             } else if u.current_page() == id {
-                u.split.set_show_sidebar(false);
+                u.close_panel();
             }
         }));
     }
-    ui.split.connect_show_sidebar_notify(on!(ui, |u, sp| {
-        if !sp.shows_sidebar() {
-            u.loading.set(true);
-            for (_, b) in &u.tool_btns {
-                b.set_active(false);
-            }
-            u.loading.set(false);
-        }
-    }));
     {
         let wk = Rc::downgrade(ui);
-        side_close.connect_clicked(move |_| {
-            if let Some(u) = wk.upgrade() {
-                u.split.set_show_sidebar(false);
-            }
+        side_close.connect_clicked(move |_| if let Some(u) = wk.upgrade() { u.close_panel() });
+        let wk = Rc::downgrade(ui);
+        ui.cc_scrim.connect_clicked(move |_| if let Some(u) = wk.upgrade() { u.close_panel() });
+        let wk = Rc::downgrade(ui);
+        cc_strip.connect_clicked(move |_| if let Some(u) = wk.upgrade() { u.close_panel(); u.set_strip(true) });
+    }
+    for (id, b) in &ui.cc_tabs {
+        let id = *id;
+        b.connect_toggled(on!(ui, |u, b| if b.is_active() && u.current_page() != id { u.show_page(id) }));
+    }
+    {
+        // Esc closes it.
+        let keys = gtk::EventControllerKey::new();
+        let wk = Rc::downgrade(ui);
+        keys.connect_key_pressed(move |_, key, _, _| {
+            let Some(u) = wk.upgrade() else { return glib::Propagation::Proceed };
+            if key == gtk::gdk::Key::Escape && u.panel_open() { u.close_panel(); return glib::Propagation::Stop; }
+            glib::Propagation::Proceed
         });
+        ui.win.add_controller(keys);
     }
 
     // Output card
@@ -1116,6 +1200,8 @@ impl Ui {
     }
 
     pub fn add_toast(&self, toast: adw::Toast) {
+        // The Strip has no room for a toast (it would make the window taller).
+        if self.views.visible_child_name().as_deref() == Some("strip") { return; }
         self.toasts.add_toast(toast);
     }
 
@@ -1927,6 +2013,7 @@ impl Ui {
         self.update_path();
         self.update_progress();
         self.room.queue_draw();
+        self.update_stage();
     }
 
     fn update_progress(&self) {
@@ -2084,6 +2171,7 @@ impl Ui {
             time: self.t0.elapsed().as_secs_f64(), top: top.max(120.0),
             bottom: if self.capsule.is_visible() { 96.0 } else { 30.0 },
             off_note: if hp { "headphones on" } else { "not connected" },
+            kmin: 0.7, kmax: 1.35, min_avail: 200.0,
         }
     }
 
@@ -2201,8 +2289,44 @@ impl Ui {
         (nat(col), nat(self.mode_desc.parent().and_then(|p| p.parent())))
     }
 
+    /// The control centre's size (the self-test checks it never changes).
+    #[allow(dead_code)]
+    pub fn dbg_sizes(&self) {
+        let m = |n: &str, w: &gtk::Widget| eprintln!("DBG {n}: w {:?} h {:?}", w.measure(gtk::Orientation::Horizontal, -1), w.measure(gtk::Orientation::Vertical, -1));
+        m("win", self.win.upcast_ref()); m("root_ov", self.root_ov.upcast_ref()); m("toasts", self.toasts.upcast_ref());
+        m("views", self.views.upcast_ref()); m("cc_rev", self.cc_rev.upcast_ref()); m("side_box", self.side_box.upcast_ref());
+        eprintln!("DBG visible {:?}", self.views.visible_child_name());
+        let mut v = self.views.first_child();
+        while let Some(x) = v { eprintln!("DBG   view {:?} w {:?} h {:?} visible {}", self.views.page(&x).name(), x.measure(gtk::Orientation::Horizontal, -1), x.measure(gtk::Orientation::Vertical, -1), x.is_child_visible()); v = x.next_sibling(); }
+        let mut c = self.root_ov.first_child();
+        while let Some(x) = c { eprintln!("DBG   root_ov child {} meas={}", x.type_().name(), self.root_ov.is_measure_overlay(&x)); c = x.next_sibling(); }
+    }
+
+    pub fn side_box_size(&self) -> (i32, i32) {
+        let (w, _, _, _) = self.side_box.measure(gtk::Orientation::Horizontal, -1);
+        let (h, _, _, _) = self.side_box.measure(gtk::Orientation::Vertical, w);
+        (w, h)
+    }
+
+    /// The control centre's top line: the readout, then SBX, the EQ and the song.
+    pub fn fill_panel_head(&self) {
+        self.cc_ro.set_label(&self.stage.readout.label());
+        let np = self.np.borrow().as_ref().map(|n| if n.artist.is_empty() { n.title.clone() } else { format!("{} · {}", n.title, n.artist) });
+        self.cc_sub.set_label(&[Some(self.tech_line()), np].into_iter().flatten().collect::<Vec<_>>().join("  ·  "));
+    }
+
+    /// Whether the control centre is open.
+    pub fn panel_open(&self) -> bool {
+        self.cc_rev.reveals_child()
+    }
+
+    pub fn close_panel(&self) {
+        self.cc_rev.set_reveal_child(false);
+        self.cc_scrim.set_visible(false);
+    }
+
     pub fn current_page(&self) -> String {
-        if self.split.shows_sidebar() {
+        if self.panel_open() {
             self.side_stack.visible_child_name().map(|n| n.to_string()).unwrap_or_default()
         } else {
             "home".into()
@@ -2215,19 +2339,42 @@ impl Ui {
             "crystalvoice" | "mic" | "recording" => "crystalvoice",
             "setup" | "speakers" | "playback" => "setup",
             "settings" => "settings",
+            "sound" | "sbx" | "eq" | "effects" | "tone" => "sound",
+            "look" | "view" => "look",
             _ => {
-                self.split.set_show_sidebar(false);
+                self.close_panel();
                 return;
             }
         };
+        if id == "look" && let Some(u) = UI.with(|c| c.borrow().as_ref().and_then(|w| w.upgrade())) {
+            u.build_look_page();
+        }
         self.side_stack.set_visible_child_name(id);
-        self.side_title.set_label(match id { "mixer" => "Mixer", "crystalvoice" => "CrystalVoice", "setup" => "Speaker setup", _ => "Settings" });
-        self.split.set_show_sidebar(true);
+        self.side_title.set_label(match id { "mixer" => "Mixer", "crystalvoice" => "CrystalVoice", "setup" => "Speaker setup",
+                                             "sound" => "Sound", "look" => "Look and feel", _ => "Settings" });
+        self.fill_panel_head();
+        self.cc_scrim.set_visible(true);
+        self.cc_rev.set_reveal_child(true);
         let was = self.loading.replace(true);
         for (t, b) in &self.tool_btns {
             b.set_active(*t == id);
         }
+        for (t, b) in &self.cc_tabs {
+            b.set_active(*t == id);
+        }
         self.loading.set(was);
+        // A narrow window scrolls the tabs to the one shown.
+        if let Some((_, b)) = self.cc_tabs.iter().find(|(t, _)| *t == id) {
+            let (b, sw) = (b.clone(), self.cc_tab_sw.clone());
+            glib::idle_add_local_once(move || {
+                if let Some(child) = sw.child() && let Some(r) = b.compute_bounds(&child) {
+                    let adj = sw.hadjustment();
+                    let x = r.x() as f64;
+                    let w = r.width() as f64;
+                    if x < adj.value() || x + w > adj.value() + adj.page_size() { adj.set_value((x - 24.0).max(0.0)); }
+                }
+            });
+        }
     }
 
     // ---- fill the widgets from the settings
@@ -2339,6 +2486,7 @@ impl Ui {
         self.update_item_buttons();
         self.loading.set(was);
         self.refresh_summary();
+        self.update_stage();
     }
 
     pub fn refresh_summary(&self) {
@@ -2384,6 +2532,13 @@ pub fn mode_description(s: &Settings) -> String {
         (false, false) => format!("Pure {cfg}: no SBX effects. The equaliser stays on."),
     };
     format!("{d}{stereo}")
+}
+
+/// Runs something with the window's state, if the window is open.
+fn with_ui(f: impl FnOnce(&Rc<Ui>)) {
+    if let Some(u) = UI.with(|c| c.borrow().as_ref().and_then(|w| w.upgrade())) {
+        f(&u);
+    }
 }
 
 thread_local! {
