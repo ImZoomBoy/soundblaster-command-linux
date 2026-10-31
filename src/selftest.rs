@@ -427,7 +427,7 @@ fn steps() -> Vec<Step> {
         check(s(u).cur_profile() == "Night" && s(u).tone == -1, format!("films: {} {}", s(u).cur_profile(), s(u).tone))?;
         check(u.kind_dd.selected() as usize == model::KINDS.iter().position(|k| k.0 == "film").unwrap(), "the Sound tab shows Films")?;
         // Something playing switches to its kind's sound; the Sound tab can show
-        // another kind while ☰ is open, and closing ☰ goes back.
+        // another kind while ☰ is open, and a kind picked there holds.
         let tv = || Some(Detection { activity: "movie", source: "Kodi".into(), title: "Quiet Harbour S02E03".into(), ..Default::default() });
         u.on_detected(tv(), false);
         u.on_detected(tv(), true);
@@ -435,8 +435,14 @@ fn steps() -> Vec<Step> {
         u.show_page("sound");
         u.kind_dd.set_selected(model::KINDS.iter().position(|k| k.0 == "film").unwrap() as u32);
         check(s(u).kind == "film" && s(u).cur_profile() == "Night", "picking Films in the Sound tab plays its sound")?;
+        // A kind picked by hand while it plays is a hold: closing ☰ keeps it
+        // until "Back to automatic".
+        check(s(u).hold.as_deref() == Some("Kodi"), "the pick holds")?;
+        check(s(u).app_memory.get("Kodi").is_some_and(|m| m.profile == "Cinema"), "a kind picked to hear went into Kodi's memory")?;
         u.close_panel();
-        check(s(u).kind == "tv" && s(u).cur_profile() == "Cinema", "closing ☰ goes back to what's playing")?;
+        check(s(u).kind == "film", "closing ☰ keeps a held pick")?;
+        u.back_to_automatic();
+        check(s(u).hold.is_none() && s(u).kind == "tv" && s(u).cur_profile() == "Cinema", "Back to automatic goes to what's playing")?;
         u.on_detected(None, true);
         *u.playing_kind.borrow_mut() = String::new();
         u.apply_kind("music");
@@ -564,6 +570,8 @@ fn steps() -> Vec<Step> {
         u.set_style("FPS");
         u.apply_eq("Vocal");
         check(s(u).app_memory.get("Cyberpunk 2077").is_some_and(|m| m.profile == "FPS" && m.eq == "Vocal"), "not remembered")?;
+        // (a pick while it plays also holds it; the hold has its own step)
+        u.back_to_automatic();
         u.on_detected(None, true);
         u.set_activity("music");
         u.apply_eq("Rock");
@@ -572,6 +580,37 @@ fn steps() -> Vec<Step> {
         u.undo_switch();
         check(s(u).activity == "music" && s(u).cur_eq() == "Rock", "Undo")?;
         u.on_detected(None, true);
+        Ok(())
+    });
+    step!("A pick by hand holds while it plays", |u: &Ui| {
+        use crate::detect::Detection;
+        let rl = || Some(Detection { activity: "game", source: "Rocket League".into(), ..Default::default() });
+        u.auto_combo.set_selected(0);
+        u.s.borrow_mut().hold = None;
+        // Per-app memory off, so only the hold keeps the pick.
+        u.remember_switch.set_active(false);
+        u.set_activity("music");
+        u.apply_eq("Rock");
+        u.on_detected(rl(), false);
+        u.pick_eq("Flat");
+        check(s(u).hold.as_deref() == Some("Rocket League"), "no hold")?;
+        check(u.hold_pill.is_visible(), "no pill")?;
+        u.on_detected(None, true);
+        u.on_detected(rl(), true);
+        check(s(u).activity == "music" && s(u).cur_eq() == "Flat", "the hold didn't hold")?;
+        u.on_sources(&["Rocket League".to_string()]);
+        u.on_sources(&[]);
+        check(s(u).hold.is_some(), "a stream restart ended the hold")?;
+        u.hold_gone.set(Some(Instant::now() - Duration::from_secs(model::HOLD_GONE_SECS + 1)));
+        u.on_sources(&[]);
+        check(s(u).hold.is_none() && !u.hold_pill.is_visible(), "the hold didn't end")?;
+        u.pick_eq("Flat");
+        check(s(u).hold.is_some(), "no second hold")?;
+        u.back_to_automatic();
+        check(s(u).hold.is_none() && s(u).activity == "game", "Back to automatic")?;
+        u.on_detected(None, true);
+        u.remember_switch.set_active(true);
+        u.set_activity("music");
         Ok(())
     });
     step!("Song genres set the Music EQ", |u: &Ui| {

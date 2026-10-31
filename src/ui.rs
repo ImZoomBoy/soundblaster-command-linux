@@ -67,6 +67,11 @@ pub struct Ui {
     pub win: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     banner: adw::Banner,
+    /// "Held while X plays · Back to automatic", beside the window buttons.
+    pub hold_pill: gtk::Button,
+    hold_text: gtk::Label,
+    hold_act: gtk::Label,
+    pub hold_gone: Cell<Option<Instant>>,
     pub spinner: adw::Spinner,
 
     // ---- the window: the page, the Remote or the Strip; the window buttons
@@ -867,6 +872,17 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     // The window buttons at the top right (there's no header bar), with the
     // busy spinner beside them; always shown except in the Strip.
     let wbox = gtk::Box::builder().spacing(8).css_classes(["wctl"]).margin_top(8).margin_end(10).build();
+    // While a sound you picked is held: a pill left of the window buttons
+    // (hidden with them in the Strip); pressing it ends the hold. The small
+    // views have no room beside their top line: there it's just the red light.
+    let hold_text = gtk::Label::builder().css_classes(["hp-t"]).ellipsize(gtk::pango::EllipsizeMode::End).build();
+    let hold_act = gtk::Label::builder().label("Back to automatic").css_classes(["hp-a"]).build();
+    let hold_row = gtk::Box::builder().spacing(7).halign(gtk::Align::Center).build();
+    hold_row.append(&gtk::Box::builder().css_classes(["hp-dot"]).valign(gtk::Align::Center).build());
+    hold_row.append(&hold_text);
+    hold_row.append(&hold_act);
+    let hold_pill = gtk::Button::builder().child(&hold_row).css_classes(["hold-pill"]).valign(gtk::Align::Center).visible(false).build();
+    wbox.append(&hold_pill);
     wbox.append(&spinner);
     wbox.append(&gtk::WindowControls::new(gtk::PackType::End));
     let wctl = gtk::Revealer::builder().child(&wbox).transition_type(gtk::RevealerTransitionType::Crossfade).transition_duration(180)
@@ -889,7 +905,7 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
         jobs,
         timers: RefCell::new(HashMap::new()),
         card_ok: Cell::new(true),
-        win, toasts, banner, spinner,
+        win, toasts, banner, hold_pill, hold_text, hold_act, hold_gone: Cell::new(None), spinner,
         views, wctl, sizer, full_size: Cell::new((1240, 800)), strip_on: Cell::new(false), side_box: side.clone(), panel_narrow: Cell::new(false), cc_rev, cc_scrim, cc_tabs, cc_ro, cc_sub, cc_tab_sw,
         act_btns, tool_btns, side_stack, side_title, stage, root_ov, look_page, page: page::PageState::default(),
         room: room_da, room_lit: RefCell::new(None), levels: Cell::new([0.0; 6]), meter: RefCell::new(None), t0: Instant::now(),
@@ -942,6 +958,7 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
                     ui.vol_loading.set(false);
                 }
                 Event::Detected(d, fresh) => ui.on_detected(d, fresh),
+                Event::Sources(v) => ui.on_sources(&v),
                 Event::Genre(pick, song, fresh) => ui.on_genre(pick, song, fresh),
                 Event::NowPlaying(np) => ui.on_now_playing(np.map(|b| *b)),
                 Event::VoiceTestDone(ok) => {
@@ -1064,7 +1081,7 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
     }));
     ui.kind_dd.connect_selected_notify(on!(ui, |u, d| {
         if let Some(k) = model::KINDS.get(d.selected() as usize) {
-            u.apply_kind(k.0);
+            u.pick_kind(k.0);
         }
     }));
     ui.sbx_btn.connect_toggled(on!(ui, |u, b| if b.is_active() { u.set_sbx(true) }));
@@ -1233,6 +1250,15 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
         });
     }
 
+    {
+        let wk = Rc::downgrade(ui);
+        ui.hold_pill.connect_clicked(move |_| {
+            if let Some(u) = wk.upgrade() {
+                u.back_to_automatic();
+            }
+        });
+    }
+
     // Window actions (toast buttons, shortcut, tray)
     type Handler = Box<dyn Fn(&Ui, Option<&glib::Variant>)>;
     let add = |name: &str, param: Option<&glib::VariantTy>, f: Handler| {
@@ -1247,6 +1273,7 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
     };
     add("fix-sound", None, Box::new(|u, _| u.fix_sound()));
     add("undo-switch", None, Box::new(|u, _| u.undo_switch()));
+    add("back-to-automatic", None, Box::new(|u, _| u.back_to_automatic()));
     add("undo-eq", None, Box::new(|u, _| u.undo_eq()));
     add("use-eq", Some(glib::VariantTy::STRING), Box::new(|u, p| {
         if let Some(e) = p.and_then(|v| v.str().map(str::to_string)) {
@@ -1321,6 +1348,7 @@ impl Ui {
     pub fn reload(&self) {
         *self.s.borrow_mut() = Settings::load();
         self.refresh();
+        self.update_status();
     }
 
     // ---- activities, SBX, Scout, listening
@@ -1329,6 +1357,66 @@ impl Ui {
         self.s.borrow_mut().set_activity(id);
         self.changed(part::FX | part::EQ | part::SPEAKER);
         self.refresh();
+    }
+
+    /// A kind picked by hand (the Sound tab's picker): held while it plays.
+    /// It's another kind's sound to hear, not the playing app's own: that
+    /// app's memory stays as it was.
+    fn pick_kind(&self, k: &str) {
+        if k != self.s.borrow().kind {
+            self.hold_now();
+        }
+        let src = self.playing_source.borrow().clone();
+        let kept = src.as_ref().and_then(|a| self.s.borrow().app_memory.get(a).cloned());
+        self.apply_kind(k);
+        if let Some(a) = src {
+            let mut s = self.s.borrow_mut();
+            match kept {
+                Some(m) => { s.app_memory.insert(a, m); }
+                None => { s.app_memory.remove(&a); }
+            }
+        }
+    }
+
+    /// Your own pick while something plays: automatic switching waits (a hold).
+    fn hold_now(&self) {
+        let src = self.playing_source.borrow().clone();
+        let was = self.s.borrow().hold.is_some();
+        self.s.borrow_mut().hold_for(src.as_deref());
+        // (the page's pill says so; the small views' red light doesn't)
+        let held = self.s.borrow().hold.clone();
+        if let Some(h) = held.filter(|_| !was && self.views.visible_child_name().as_deref() != Some("page")) {
+            self.add_toast(adw::Toast::builder().use_markup(false).title(format!("Your pick stays while {h} plays"))
+                .button_label("Back to automatic").action_name("win.back-to-automatic").timeout(5).build());
+        }
+    }
+
+    /// Ends the hold; automatic switching resumes with what plays now.
+    pub fn back_to_automatic(&self) {
+        let (kind, src) = (self.playing_kind.borrow().clone(), self.playing_source.borrow().clone());
+        let now = src.as_deref().filter(|_| !kind.is_empty()).map(|s| (kind.as_str(), s));
+        let before = self.s.borrow().clone();
+        let changed = self.s.borrow_mut().release_hold(now);
+        if changed {
+            *self.undo_snapshot.borrow_mut() = Some(before);
+            self.changed(part::FX | part::EQ | part::SPEAKER);
+            self.send(Job::Listen(Box::new(self.s.borrow().clone())));
+        }
+        self.save_now();
+        self.refresh();
+    }
+
+    /// What plays now, every couple of seconds: a hold ends once its source
+    /// has been gone for a while (not at every stream restart).
+    pub fn on_sources(&self, playing: &[String]) {
+        let mut gone = self.hold_gone.get();
+        let ended = self.s.borrow_mut().hold_check(playing, &mut gone, Instant::now());
+        self.hold_gone.set(gone);
+        if ended {
+            self.save_now();
+            self.refresh();
+            self.toast("Automatic switching is back");
+        }
     }
 
     /// Plays with a kind of content's own sound (and spreads stereo its way).
@@ -1341,7 +1429,14 @@ impl Ui {
         }
     }
 
+    /// An SBX profile picked by hand (held while it plays).
     pub fn set_style(&self, style: &str) {
+        self.hold_now();
+        self.apply_style(style);
+    }
+
+    /// A profile set by the app itself: no hold.
+    pub fn apply_style(&self, style: &str) {
         {
             let mut s = self.s.borrow_mut();
             s.set_style(style);
@@ -1355,6 +1450,7 @@ impl Ui {
         if self.s.borrow().sbx_enabled == on {
             return;
         }
+        self.hold_now();
         {
             let mut s = self.s.borrow_mut();
             s.sbx_enabled = on;
@@ -1382,6 +1478,7 @@ impl Ui {
         if self.s.borrow().stereo_on == mode {
             return;
         }
+        self.hold_now();
         {
             let mut s = self.s.borrow_mut();
             s.stereo_on = mode.into();
@@ -1540,8 +1637,9 @@ impl Ui {
     // ---- equaliser
 
     /// A preset chosen by you: it stays for this song.
-    fn pick_eq(&self, name: &str) {
+    pub fn pick_eq(&self, name: &str) {
         *self.eq_override.borrow_mut() = self.song.borrow().clone();
+        self.hold_now();
         self.apply_eq(name);
         self.s.borrow_mut().remember_kind();
     }
@@ -1936,7 +2034,7 @@ impl Ui {
             self.save_now();
         }
         let mode = self.s.borrow().auto_mode.clone();
-        if !fresh || mode == "off" {
+        if !fresh || mode == "off" || self.s.borrow().hold.is_some() {
             return;
         }
         let name = model::kind_name(kind);
@@ -1980,6 +2078,7 @@ impl Ui {
             (s.auto_mode.clone(), s.activity.clone(), s.cur_eq())
         };
         if !fresh || mode == "off" || activity != "music" || cur == p.preset
+            || self.s.borrow().hold.is_some()
             || self.eq_override.borrow().as_deref() == Some(song.as_str()) {
             return;
         }
@@ -2423,7 +2522,7 @@ impl Ui {
         self.cc_scrim.set_visible(false);
         // (the Sound tab may have been showing another kind's sound)
         let pk = self.playing_kind.borrow().clone();
-        if !pk.is_empty() && pk != self.s.borrow().kind {
+        if !pk.is_empty() && pk != self.s.borrow().kind && self.s.borrow().hold.is_none() {
             self.apply_kind(&pk);
         }
     }
@@ -2626,6 +2725,15 @@ impl Ui {
     pub fn update_status(&self) {
         self.banner.set_revealed(!self.card_ok.get());
         let s = self.s.borrow();
+        if let Some(h) = &s.hold {
+            self.hold_text.set_label(&format!("Held while {h} plays"));
+            self.hold_pill.set_tooltip_text(Some(&format!("The sound you picked stays while {h} plays. Press to switch by itself again.")));
+        }
+        let wide = self.views.visible_child_name().as_deref() == Some("page");
+        self.hold_text.set_visible(wide);
+        self.hold_act.set_visible(wide);
+        if wide { self.hold_pill.remove_css_class("dot") } else { self.hold_pill.add_css_class("dot") }
+        self.hold_pill.set_visible(s.hold.is_some());
         let sound = if s.sbx_active() { format!("SBX {}", s.cur_profile()) } else { "Pure".into() };
         self.win.set_title(Some(&format!("Sound Blaster Command — {} · {sound}", model::activity_label(&s.activity))));
     }

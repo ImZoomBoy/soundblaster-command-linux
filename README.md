@@ -105,6 +105,9 @@ Click a choice to see its options. The small print under each option says what i
 Music, films, TV, games, sport, online video and streams each remember their own sound. When one starts
 playing, the app switches to its sound by itself. It also remembers your sound for each game and app.
 
+If you change the sound while something plays, your change stays until it stops. Press **Back to automatic**,
+at the top right, to let the app switch again straight away.
+
 ## 5. Any window size
 
 The window rearranges itself to fit, whatever its size.

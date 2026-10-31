@@ -34,6 +34,11 @@ fn open_window() {
     }
 }
 
+/// The source that sets the card now (what a hand-picked sound is held for).
+fn playing_source() -> Option<String> {
+    crate::detect::main_of(&crate::detect::detect_each()).map(|d| d.source)
+}
+
 impl Tray {
     fn summary(&self) -> String {
         let s = &self.s;
@@ -43,9 +48,11 @@ impl Tray {
         format!("{kind} · {sound} · {spk}")
     }
 
-    /// A change you make: kept as the current kind of content's own sound too.
+    /// A change you make: kept as the current kind of content's own sound
+    /// too, and held while something plays.
     fn edit(&mut self, parts: u32, listen: bool, f: impl FnOnce(&mut Settings)) {
         let mut s = Settings::load();
+        s.hold_for(playing_source().as_deref());
         f(&mut s);
         s.remember_kind();
         commit(&s, parts, listen);
@@ -80,11 +87,31 @@ impl ksni::Tray for Tray {
         let mut items: Vec<MenuItem<Self>> = vec![
             StandardItem { label: self.summary(), enabled: false, ..Default::default() }.into(),
             MenuItem::Separator,
+        ];
+        if let Some(h) = &s.hold {
+            items.push(StandardItem {
+                label: format!("Held while {h} plays: Back to automatic"),
+                activate: Box::new(|t: &mut Self| {
+                    let mut s = Settings::load();
+                    let now = crate::detect::main_of(&crate::detect::detect_each());
+                    let now = now.map(|d| (crate::meta::kind_of_detection(&d), d.source));
+                    s.release_hold(now.as_ref().map(|(k, src)| (*k, src.as_str())));
+                    commit(&s, part::FX | part::EQ | part::SPEAKER, true);
+                    t.s = s;
+                }),
+                ..Default::default()
+            }.into());
+            items.push(MenuItem::Separator);
+        }
+        items.extend::<Vec<MenuItem<Self>>>(vec![
             RadioGroup {
                 selected: model::KINDS.iter().position(|k| k.0 == kind).unwrap_or(0),
                 select: Box::new(|t: &mut Self, i| {
                     let k = model::KINDS[i].0;
                     let mut s = Settings::load();
+                    if s.kind != k {
+                        s.hold_for(playing_source().as_deref());
+                    }
                     s.set_kind(k);
                     commit(&s, part::FX | part::EQ | part::SPEAKER, true);
                     t.s = s;
@@ -126,7 +153,7 @@ impl ksni::Tray for Tray {
                 }.into()],
                 ..Default::default()
             }.into(),
-        ];
+        ]);
         if !s.headphones() {
             items.push(MenuItem::Separator);
             if model::channels(&s.speaker_config).contains(&"RL") {

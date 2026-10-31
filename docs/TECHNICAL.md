@@ -65,6 +65,13 @@ Only your own changes are remembered, never the automatic switches. **Settings â
 playing** decides what happens: **Switch automatically**, **Suggest a switch** (it offers the switch and you
 press it), or **Do nothing**.
 
+**A sound you pick holds.** Change the sound while something plays, and nothing switches it by itself (not
+the next song's genre either) until that app or game has stopped for 30 seconds. A game restarting its sound
+doesn't count. A pill beside the window buttons says what it's held for; press **Back to automatic** there,
+or in the tray menu, to switch now. In the small views the pill is a red light. Your changes are still
+remembered for that app. Picking another kind in **Sound** to hear it holds too, but isn't remembered for the
+app that's playing.
+
 ### Plain words for Creative's settings
 
 Creative's app shows knobs and profile names. The page shows four choices in plain words instead: *in front of

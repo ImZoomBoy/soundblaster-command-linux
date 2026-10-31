@@ -43,6 +43,9 @@ pub enum Event {
     /// What's playing changed. `fresh` is false for the first report after
     /// starting, which only updates the display.
     Detected(Option<detect::Detection>, bool),
+    /// Every source playing now (every couple of seconds): a hold ends when
+    /// its source is gone for a while.
+    Sources(Vec<String>),
     /// A new song: the EQ preset its genre suggests (if any), the song, and
     /// whether it's fresh (false for the first song after starting).
     Genre(Option<crate::genre::EqPick>, String, bool),
@@ -129,7 +132,11 @@ pub fn spawn(events: async_channel::Sender<Event>) -> mpsc::Sender<Job> {
                 let mut tracker = detect::Tracker::new();
                 let mut songs = detect::SongTracker::default();
                 loop {
-                    let now = detect::detect();
+                    let each = detect::detect_each();
+                    let now = detect::main_of(&each);
+                    if ev.send_blocking(Event::Sources(each.iter().map(|(_, d)| d.source.clone()).collect())).is_err() {
+                        break;
+                    }
                     if let Some((d, fresh)) = tracker.update(now.clone())
                         && ev.send_blocking(Event::Detected(d, fresh)).is_err() {
                             break;
@@ -253,6 +260,7 @@ pub fn watch() -> ! {
     // as last seen: each app's own sound and the lighter effects follow them.
     let mut last_streams = String::new();
     let mut beside = detect::BesideGame::new();
+    let mut hold_gone: Option<Instant> = None;
     let mut tray = if Settings::load().tray { crate::tray::start() } else { None };
     loop {
         // Keep the tray in step with changes made in the window.
@@ -285,6 +293,16 @@ pub fn watch() -> ! {
             let mut s = Settings::load();
             s.kind = crate::meta::kind_of_detection(&d).into();
             let _ = s.save();
+        }
+        // A hold (a sound picked by hand) ends when its source has been gone
+        // a while. With the window open it does that itself.
+        let mut cur = cur;
+        if cur.hold.is_some() && !window_open() {
+            let playing: Vec<String> = each.iter().map(|(_, d)| d.source.clone()).collect();
+            if cur.hold_check(&playing, &mut hold_gone, Instant::now()) {
+                let _ = cur.save();
+                eprintln!("sbcommand: hold ended, automatic again");
+            }
         }
         if cur.auto_mode != "off" {
             let now = detect::main_of(&each);
@@ -338,6 +356,9 @@ fn background_switch(d: detect::Detection) {
     // The kind of content's own sound, then what was last used with this game
     // or app, then a game's own Creative profile.
     let mut s = Settings::load();
+    if s.hold.is_some() {
+        return;
+    }
     let kind = crate::meta::kind_of_detection(&d);
     let name = crate::model::kind_name(kind).to_lowercase();
     let body = format!("{} is playing", d.source);
@@ -373,7 +394,7 @@ fn background_eq(d: &detect::Detection) {
         return;
     }
     let mut s = Settings::load();
-    if s.auto_mode != "auto" || s.activity != "music" {
+    if s.auto_mode != "auto" || s.activity != "music" || s.hold.is_some() {
         return;
     }
     if let Some(pick) = crate::genre::pick_eq(d, s.genre_online)

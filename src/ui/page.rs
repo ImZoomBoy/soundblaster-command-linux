@@ -615,6 +615,7 @@ impl Ui {
             }
             "tone" => {
                 let t = v.parse::<i32>().unwrap_or(0).clamp(-2, 2);
+                self.hold_now();
                 {
                     let mut s = self.s.borrow_mut();
                     s.tone = t;
@@ -752,13 +753,13 @@ impl Ui {
                     if was.is_none() {
                         *self.page.before_live.borrow_mut() = Some(cur.clone());
                     }
-                    self.set_style(want);
+                    self.apply_style(want);
                 }
             }
             Some(_) => {
                 if let Some(prev) = self.page.before_live.borrow_mut().take()
                     && matches!(cur.as_str(), "Concert" | "Stadium" | "Arena") {
-                        self.set_style(&prev);
+                        self.apply_style(&prev);
                     }
             }
             None => {}
@@ -1963,6 +1964,7 @@ impl Ui {
         let view = if self.strip_on.get() || h < 300 { "strip" } else if compact_theme || small { if mini { "mini" } else { "remote" } } else { "page" };
         if self.views.visible_child_name().as_deref() != Some(view) {
             self.views.set_visible_child_name(view);
+            self.update_status();
         }
         // The window buttons are always there at the top right (hidden until
         // the pointer came near, they were hard to reach), except in the

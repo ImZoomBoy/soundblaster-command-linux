@@ -294,6 +294,9 @@ impl Default for Rec {
     }
 }
 
+/// A hold ends when its source has been gone this long.
+pub const HOLD_GONE_SECS: u64 = 30;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -352,6 +355,11 @@ pub struct Settings {
     /// When something starts playing: "auto" (switch Game / Movie & TV / Music),
     /// "suggest" (offer to switch), or "off".
     pub auto_mode: String,
+    /// A hold: the source that was playing when you picked a kind, SBX profile
+    /// or EQ by hand. While it is set nothing switches the sound by itself.
+    /// It ends when that source has been gone for `HOLD_GONE_SECS`, or at
+    /// "Back to automatic". Picks made meanwhile are still remembered for the app.
+    pub hold: Option<String>,
     /// Extra output level on the speakers, 0..9 dB above the safe 0 dB (Windows
     /// ran the card at +9). Too much can make loud sound fuzzy.
     pub boost_db: f64,
@@ -668,6 +676,7 @@ impl Default for Settings {
             eqs: BTreeMap::new(),
             genre_online: true,
             auto_mode: "auto".into(),
+            hold: None,
             boost_db: 0.0,
             remember_apps: true,
             app_memory: BTreeMap::new(),
@@ -1003,11 +1012,53 @@ impl Settings {
     /// with that game or app, then a game's own Creative profile. True if
     /// anything changed.
     pub fn switch_for(&mut self, kind: &str, source: &str) -> bool {
+        if self.hold.is_some() {
+            return false;
+        }
         let before = self.sound_now();
         self.set_kind(kind);
         self.recall_app(source);
         self.follow_game(source);
         before != self.sound_now()
+    }
+
+    /// You picked a sound by hand while `source` plays: keep it until that
+    /// source is gone (nothing playing: no hold).
+    pub fn hold_for(&mut self, source: Option<&str>) {
+        if let Some(src) = source.filter(|s| !s.trim().is_empty()) {
+            self.hold = Some(src.into());
+        }
+    }
+
+    /// Ends a hold whose source hasn't played for `HOLD_GONE_SECS` (stream
+    /// restarts don't count). `gone` is the caller's timer; `playing` is every
+    /// source now playing. True if the hold ended.
+    pub fn hold_check(&mut self, playing: &[String], gone: &mut Option<std::time::Instant>, now: std::time::Instant) -> bool {
+        let Some(h) = &self.hold else {
+            *gone = None;
+            return false;
+        };
+        if playing.iter().any(|p| p == h) {
+            *gone = None;
+            return false;
+        }
+        let since = *gone.get_or_insert(now);
+        if now.saturating_duration_since(since) >= std::time::Duration::from_secs(HOLD_GONE_SECS) {
+            self.hold = None;
+            *gone = None;
+            return true;
+        }
+        false
+    }
+
+    /// "Back to automatic": ends the hold and, if switching is automatic,
+    /// applies what is playing now (kind, source). True if the sound changed.
+    pub fn release_hold(&mut self, now: Option<(&str, &str)>) -> bool {
+        self.hold = None;
+        match now {
+            Some((kind, source)) if self.auto_mode == "auto" => self.switch_for(kind, source),
+            _ => false,
+        }
     }
 
     pub fn follow_game(&mut self, source: &str) -> bool {
@@ -1593,6 +1644,56 @@ mod tests {
         s.stereo_on = "nonsense".into();
         s.sanitise();
         assert_eq!(s.stereo_on, "front");
+    }
+
+    #[test]
+    fn a_hold_blocks_automatic_switching() {
+        let mut s = Settings::default();
+        s.set_kind("music");
+        s.hold_for(None);
+        assert!(s.hold.is_none(), "nothing playing: no hold");
+        s.hold_for(Some("Rocket League"));
+        s.set_eq("Rock");
+        assert!(!s.switch_for("game", "Rocket League"), "held: no switch");
+        assert_eq!((s.kind.as_str(), s.cur_eq().as_str()), ("music", "Rock"));
+        assert!(s.release_hold(Some(("game", "Rocket League"))), "back to automatic switches now");
+        assert!(s.hold.is_none() && s.kind == "game");
+        s.hold_for(Some("Rocket League"));
+        s.auto_mode = "suggest".into();
+        s.set_kind("music");
+        assert!(!s.release_hold(Some(("game", "Rocket League"))), "suggest never switches by itself");
+        assert_eq!(s.kind, "music");
+    }
+
+    #[test]
+    fn a_hold_ends_after_its_source_is_gone() {
+        use std::time::{Duration, Instant};
+        let mut s = Settings::default();
+        s.hold_for(Some("Rocket League"));
+        let t0 = Instant::now();
+        let mut gone = None;
+        let rl = vec!["Rocket League".to_string()];
+        let other = vec!["Spotify".to_string()];
+        assert!(!s.hold_check(&rl, &mut gone, t0));
+        assert!(!s.hold_check(&other, &mut gone, t0 + Duration::from_secs(5)));
+        // The stream comes back (a restart): the timer starts over.
+        assert!(!s.hold_check(&rl, &mut gone, t0 + Duration::from_secs(20)));
+        assert!(!s.hold_check(&[], &mut gone, t0 + Duration::from_secs(25)));
+        assert!(!s.hold_check(&[], &mut gone, t0 + Duration::from_secs(50)), "29 s is not enough");
+        assert!(s.hold_check(&[], &mut gone, t0 + Duration::from_secs(25 + HOLD_GONE_SECS)));
+        assert!(s.hold.is_none());
+        s.switch_for("game", "Rocket League");
+        assert_eq!(s.kind, "game", "automatic again");
+    }
+
+    #[test]
+    fn a_pick_while_held_is_remembered() {
+        let mut s = Settings::default();
+        s.set_activity("game");
+        s.set_style("FPS");
+        s.hold_for(Some("Rocket League"));
+        s.remember_app("Rocket League");
+        assert_eq!(s.app_memory["Rocket League"].profile, "FPS", "your own pick is the game's sound next time too");
     }
 
     #[test]

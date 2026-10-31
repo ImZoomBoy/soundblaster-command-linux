@@ -70,6 +70,14 @@ popover .amenu .mn-sep { font-family: "Archivo Narrow"; font-weight: 700; font-s
 .wctl windowcontrols button { min-width: 30px; min-height: 30px; padding: 0; border-radius: 999px; background: alpha(black,0.72); border: 1px solid alpha(white,0.16); color: white; box-shadow: none; }
 .wctl windowcontrols button:hover { background: alpha(white,0.18); }
 .wctl windowcontrols button.close:hover { background: #e3262f; border-color: #e3262f; }
+/* a held sound: the pill left of the window buttons */
+.wctl .hold-pill { min-height: 30px; padding: 0 13px 0 11px; border-radius: 999px; background: alpha(black,0.72); border: 1px solid alpha(white,0.16); color: white; box-shadow: none; }
+.wctl .hold-pill:hover { border-color: #e3262f; background: alpha(black,0.85); }
+.wctl .hold-pill.dot { min-width: 30px; padding: 0; }
+.wctl .hold-pill .hp-dot { min-width: 7px; min-height: 7px; border-radius: 99px; background: #e3262f; }
+.wctl .hold-pill .hp-t, .wctl .hold-pill .hp-a { font-family: "Archivo Narrow"; font-weight: 700; font-size: 12px; letter-spacing: 0.3px; }
+.wctl .hold-pill .hp-t { color: alpha(white,0.86); }
+.wctl .hold-pill .hp-a { color: #ff4b53; }
 /* Over your shoulder, mini */
 .shoulder { background: #050505; }
 .shoulder .sh-shade { background: linear-gradient(to bottom, alpha(black,0.85) 0%, alpha(black,0.45) 24%, alpha(black,0.2) 40%, alpha(black,0.72) 56%, #050505 68%); }
