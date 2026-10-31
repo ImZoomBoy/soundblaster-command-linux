@@ -229,6 +229,7 @@ fn main() -> glib::ExitCode {
                 std::env::set_var("SBCOMMAND_DRYRUN", "1");
                 std::env::set_var("SBCOMMAND_CONFIG_DIR", &dir);
             }
+            selftest::watch_gtk_warnings();
             gui(None, true)
         }
         "" | "home" | "effects" | "compare" | "sbx" | "crystalvoice" | "mic" | "recording" | "scout" | "speakers" | "playback" | "speaker-test"

@@ -535,8 +535,6 @@ fn speaker_icon() -> gtk::DrawingArea {
     a
 }
 
-/// The design's chevron after a word you can change: half the word's size,
-/// a thin red stroke sitting on its baseline.
 /// The first label inside a widget (a choice's word inside its button).
 fn first_label(w: &gtk::Widget) -> Option<gtk::Label> {
     if let Some(l) = w.downcast_ref::<gtk::Label>() {
@@ -552,6 +550,15 @@ fn first_label(w: &gtk::Widget) -> Option<gtk::Label> {
     None
 }
 
+/// A widget's height at a width, asked for no narrower than it can be (GTK
+/// warns, every time, when a widget is measured for less than its least width).
+fn height_at(w: &impl IsA<gtk::Widget>, width: i32) -> i32 {
+    let least = w.measure(gtk::Orientation::Horizontal, -1).0;
+    w.measure(gtk::Orientation::Vertical, width.max(least)).1
+}
+
+/// The design's chevron after a word you can change: half the word's size,
+/// a thin red stroke sitting on its baseline.
 pub(crate) fn chevron(word: &gtk::Label) -> gtk::DrawingArea {
     let a = gtk::DrawingArea::builder().content_width(12).css_classes(["chev"]).build();
     let wk = word.downgrade();
@@ -1333,11 +1340,17 @@ impl Stage {
         for t in &self.tiles {
             t.set_visible(on && t.first_child().is_some());
         }
-        let ch = self.dock.measure(gtk::Orientation::Vertical, w).1 as f64;
-        let th = self.tiles.iter().filter(|t| t.first_child().is_some())
-            .map(|t| t.measure(gtk::Orientation::Vertical, -1).1 - t.margin_top() - t.margin_bottom()).max().unwrap_or(70) as f64;
-        let head_h = self.head.measure(gtk::Orientation::Vertical, (w - 72).max(200)).1 - self.head.margin_top() - self.head.margin_bottom();
-        let g = on.then(|| half_geo(&half, w as f64, h as f64, ch, th, head_h as f64));
+        let g = on.then(|| {
+            // The title block across the window (36 px each side), measured
+            // at the width it gets: its margins count in GTK's sizes.
+            self.head.set_width_request((w - 2 * 36).max(200));
+            let ch = height_at(&self.dock, w) as f64;
+            let th = self.tiles.iter().filter(|t| t.first_child().is_some())
+                .map(|t| t.measure(gtk::Orientation::Vertical, -1).1 - t.margin_top() - t.margin_bottom()).max().unwrap_or(70) as f64;
+            let (hm0, hm1) = (self.head.margin_start() + self.head.margin_end(), self.head.margin_top() + self.head.margin_bottom());
+            let head_h = height_at(&self.head, (w - 2 * 36).max(200) + hm0) - hm1;
+            half_geo(&half, w as f64, h as f64, ch, th, head_h as f64)
+        });
         self.half_geo.set(g);
         let from_right = matches!(half.as_str(), "blueprint" | "callouts");
         if let Some(g) = g {
@@ -1371,7 +1384,6 @@ impl Stage {
         self.corner.set_visible(!on && (!self.compact.get() || w >= 640));
         if let Some(g) = g {
             self.head.set_margin_top(g.head_top);
-            self.head.set_width_request((w - 2 * 36).max(200));
         }
     }
 

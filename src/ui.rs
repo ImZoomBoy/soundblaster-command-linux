@@ -843,7 +843,14 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     side.append(&cc_tab_sw);
     side.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     side.append(&side_stack);
-    let cc_rev = gtk::Revealer::builder().child(&side).transition_type(gtk::RevealerTransitionType::Crossfade).transition_duration(160)
+    // The panel asks for no size of its own (a ScrolledWindow with no bars):
+    // its size comes from the window (`size_panel`), and while a window shrinks,
+    // before that catches up, GTK would otherwise warn it got less than it needs.
+    // Nothing is clipped, so the panel's shadow still shows.
+    let cc_clip = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::External).vscrollbar_policy(gtk::PolicyType::External)
+        .propagate_natural_width(true).propagate_natural_height(true).overflow(gtk::Overflow::Visible).child(&side).build();
+    if let Some(vp) = cc_clip.child() { vp.set_overflow(gtk::Overflow::Visible) }
+    let cc_rev = gtk::Revealer::builder().child(&cc_clip).transition_type(gtk::RevealerTransitionType::Crossfade).transition_duration(160)
         .halign(gtk::Align::End).valign(gtk::Align::End).margin_end(24).margin_bottom(84).reveal_child(false).build();
     // The rest of the window dims while it's open; a click there closes it.
     let cc_scrim = gtk::Button::builder().css_classes(["cc-scrim"]).hexpand(true).vexpand(true).visible(false).build();

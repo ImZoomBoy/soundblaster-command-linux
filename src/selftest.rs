@@ -21,6 +21,24 @@ fn s(u: &Ui) -> std::cell::Ref<'_, Settings> {
     u.s.borrow()
 }
 
+/// GTK's warnings and criticals while the self-test runs (they are still
+/// printed). A size warning ("Trying to measure ... but it needs at least")
+/// repeats in the log for as long as a layout is wrong, so any fails the test.
+static GTK_WARNINGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Starts noting GTK's warnings; called before the window is made.
+pub fn watch_gtk_warnings() {
+    glib::log_set_writer_func(|level, fields| {
+        if matches!(level, glib::LogLevel::Warning | glib::LogLevel::Critical) {
+            let get = |k: &str| fields.iter().find(|f| f.key() == k).and_then(|f| f.value_str()).unwrap_or("");
+            if get("GLIB_DOMAIN") == "Gtk" {
+                GTK_WARNINGS.lock().unwrap_or_else(|e| e.into_inner()).push(get("MESSAGE").to_string());
+            }
+        }
+        glib::log_writer_default(level, fields)
+    });
+}
+
 /// The window's Ui itself (for what needs the shared handle).
 fn rc() -> std::rc::Rc<Ui> {
     crate::ui::UI.with(|c| c.borrow().as_ref().and_then(|w| w.upgrade())).expect("the window")
@@ -863,8 +881,15 @@ pub fn run(ui: Rc<Ui>, app: adw::Application) {
         } else {
             println!("PASS  window stayed responsive (longest pause {} ms)", w.as_millis());
         }
+        let warned = GTK_WARNINGS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if warned.is_empty() {
+            println!("PASS  no GTK warnings");
+        } else {
+            println!("FAIL  no GTK warnings ({}, first: {})", warned.len(), warned[0]);
+            failures.borrow_mut().push("GTK warnings".into());
+        }
         let n = failures.borrow().len();
-        println!("\n{} checks, {} failed", total + 2, n);
+        println!("\n{} checks, {} failed", total + 3, n);
         let _ = std::fs::remove_dir_all(crate::model::config_dir());
         if n > 0 {
             std::process::exit(1);

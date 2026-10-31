@@ -27,8 +27,10 @@ pub fn tell_window_to_reload() {
 }
 
 fn open_window() {
-    if let Ok(exe) = std::env::current_exe() {
-        let _ = std::process::Command::new(exe).spawn();
+    // Waited for on its own thread, or each closed window stays behind as a
+    // dead entry under the background service.
+    if let Ok(exe) = std::env::current_exe() && let Ok(mut child) = std::process::Command::new(exe).spawn() {
+        std::thread::spawn(move || { let _ = child.wait(); });
     }
 }
 
