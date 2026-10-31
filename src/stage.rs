@@ -44,6 +44,7 @@ pub const CSS: &str = r#"
 .stage .bigart { box-shadow: 0 22px 50px alpha(black,0.85), 0 0 0 1px alpha(white,0.36); }
 .stage .dock { background: linear-gradient(to top, alpha(black,0.92) 0%, alpha(black,0.69) 50%, transparent 100%); padding: 40px 46px 20px 46px; }
 .stage .soundtag { background: #e3262f; border-radius: 3px; padding: 5px 10px; margin-right: 4px; font-family: "Anton"; font-size: 18px; color: white; }
+.stage .chev, popover .chev { color: #ff4b53; }
 .stage .f-l { font-family: "Archivo Narrow"; font-weight: 700; font-size: 10.5px; letter-spacing: 1.4px; color: #ff4b53; }
 .stage .f-v button { border: 2px solid alpha(white,0.34); border-radius: 4px; background: alpha(black,0.33); padding: 1px 6px 1px 7px; min-height: 0; box-shadow: none; }
 .stage .f-v button:hover { border-color: #e3262f; background: alpha(#e3262f,0.12); }
@@ -126,6 +127,36 @@ pub const CSS: &str = r#"
 .stage.compact .bignum { font-size: 56px; } .stage.compact .dock { padding: 24px 16px 12px 16px; }
 .stage.compact .rows label.v { font-size: 20px; }
 .stage.compact .shade { background: linear-gradient(to bottom, alpha(black,0.2) 0%, alpha(black,0.75) 45%, alpha(black,0.95) 100%); }
+/* half a screen (round 125): each theme its own layout */
+.stage.half .shade { background: linear-gradient(to bottom, alpha(black,0.9) 0%, alpha(black,0.6) 26%, alpha(black,0.45) 60%, alpha(black,0.92) 100%); }
+.stage.half .tile { padding: 12px 16px; }
+.stage.half .tile .f-l { font-size: 11px; letter-spacing: 1.5px; }
+.stage.half .tile .f-v button, .stage.half .tile .chip > button { border: none; background: none; padding: 0; box-shadow: none; min-height: 0; }
+.stage.half .tile label.v, .stage.half .tile .chip label { font-family: "Anton"; font-weight: normal; font-size: 26px; letter-spacing: 0; color: white; }
+.stage.half .dock { padding: 18px 28px 22px 28px; }
+.stage.half-oys .tile { background: alpha(#0b0b0d,0.8); border: 1px solid alpha(white,0.1); border-radius: 14px; }
+.stage.half-oys .tile:hover { border-color: alpha(#e3262f,0.8); }
+.stage.half-oys .dock { background: alpha(black,0.85); border-top: 1px solid alpha(white,0.08); padding: 20px 24px; }
+.stage.half-blueprint .shade { background: alpha(#060607,0.82); }
+.stage.half-blueprint .tile { border: 1.5px solid white; padding: 10px 12px; background: alpha(#060607,0.7); }
+.stage.half-blueprint .tile:hover { border-color: #ff4b53; }
+.stage.half-blueprint .tile label.v, .stage.half-blueprint .tile .chip label { font-size: 22px; }
+.stage.half-blueprint .dock { background: none; }
+.stage.half-blueprint .low { border: 1.5px solid white; padding: 10px 16px; background: alpha(#060607,0.85); }
+.stage.half-screenprint .shade { background: linear-gradient(to bottom, alpha(black,0.25) 0%, alpha(black,0.1) 30%, black 62%); }
+.stage.half-screenprint .hband { background: #e3262f; }
+.stage.half-screenprint .kick { color: white; }
+.stage.half-screenprint .artist { color: #1a0406; }
+.stage.half-screenprint .title { text-shadow: none; }
+.stage.half-screenprint .hline { color: alpha(white,0.86); }
+.stage.half-screenprint .tile { background: #b5141c; box-shadow: 6px 6px 0 black; }
+.stage.half-screenprint .tile:hover { background: #c81922; }
+.stage.half-screenprint .tile .f-l { color: #ffd0d3; }
+.stage.half-screenprint .tile .chev { color: white; }
+.stage.half-screenprint .dock { background: black; }
+.stage.half-callouts .tile { padding: 4px 0; }
+.stage.half-callouts .tile label.v, .stage.half-callouts .tile .chip label { font-size: 24px; }
+.stage.half-callouts .dock { background: linear-gradient(to top, alpha(black,0.92), alpha(black,0.6) 60%, transparent); padding-top: 30px; }
 popover.choices button { padding: 7px 16px; border-radius: 9px; font-family: "Anton"; font-weight: normal; font-size: 20px; color: alpha(white,0.6); background: none; }
 popover.choices button:hover { background: alpha(white,0.08); color: white; }
 popover.choices button.cur { background: #e3262f; color: white; }
@@ -182,6 +213,91 @@ pub enum Corner {
     Big(String, usize, usize),
     /// Live: venue, date.
     Venue(String, String),
+}
+
+/// Where things go on half a screen: the room's box, the tiles' boxes, the
+/// title's top (all page pixels).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HalfGeo {
+    pub room: (f64, f64, f64, f64),
+    pub tiles: [(f64, f64, f64, f64); 4],
+    pub head_top: i32,
+    /// Screenprint's red band behind the title: its top and height.
+    pub band: Option<(f64, f64)>,
+}
+
+/// Half a screen, per theme (round 125, `half-round125.html`): Over your
+/// shoulder fills the middle with the room and puts the choices two to a row
+/// over the controls; Screenprint prints the room across the top with the
+/// title on a red band and red blocks below; Blueprint draws the plan in the
+/// middle with the choices as notes at its corners; Callouts puts the
+/// choices at the corners with red lines to what they change.
+/// `ch` is the controls' height at the bottom, `th` a tile's, `head_h` the
+/// title block's (kicker, title, artist, the "year · app" line).
+pub fn half_geo(theme: &str, w: f64, h: f64, ch: f64, th: f64, head_h: f64) -> HalfGeo {
+    const M: f64 = 28.0;
+    let ch = ch.max(60.0);
+    let th = th.max(50.0);
+    // Two by two, or (a short window) four in a row so the room keeps its height.
+    let one_row = h < 760.0;
+    let rows_h = |gap: f64| if one_row { th } else { 2.0 * th + gap };
+    let grid = |top: f64, gap: f64| {
+        if one_row {
+            let tw = (w - 2.0 * M - 3.0 * gap) / 4.0;
+            return std::array::from_fn(|i| (M + i as f64 * (tw + gap), top, tw, th));
+        }
+        let tw = (w - 2.0 * M - gap) / 2.0;
+        [(M, top, tw, th), (M + tw + gap, top, tw, th), (M, top + th + gap, tw, th), (M + tw + gap, top + th + gap, tw, th)]
+    };
+    // Below the title block, with a little air.
+    let below_title = 56.0 + head_h.max(90.0) + 20.0;
+    match theme {
+        "screenprint" => {
+            // From the bottom up: the controls, the red blocks, the red band with
+            // the title; the room takes the rest of the top.
+            let top = h - ch - rows_h(12.0) - 14.0;
+            // The band holds the whole title block (kicker to the "year · app" line).
+            let bh = (head_h + 40.0).clamp(150.0, 240.0);
+            let band = (top - 16.0 - bh, bh);
+            HalfGeo { room: (0.0, 0.0, w, band.0 + 30.0), tiles: grid(top, 12.0), head_top: (band.0 + 18.0) as i32, band: Some(band) }
+        }
+        "blueprint" => {
+            // The plan between the four notes, centred in the space under the title.
+            let bottom = h - ch - 24.0;
+            let rw = (w - 2.0 * (M + 200.0 + 24.0)).max(260.0);
+            let rh = (bottom - below_title).min(rw * 0.86);
+            let rw = rh / 0.86;
+            let ry = below_title + ((bottom - below_title - rh) / 2.0).max(0.0);
+            let rx = (w - rw) / 2.0;
+            let tw = (rx - M - 24.0).max(150.0);
+            HalfGeo { room: (rx, ry, rw, rh), tiles: [(M, ry, tw, th), (w - M - tw, ry, tw, th), (M, ry + rh - th, tw, th), (w - M - tw, ry + rh - th, tw, th)],
+                      head_top: 56, band: None }
+        }
+        "callouts" => {
+            // The choices at the room's corners: above and below it, or (a short
+            // window) beside it, so the room keeps its size.
+            let ry = below_title + th;
+            let rh = h - ry - th - ch - 16.0;
+            if rh >= h * 0.4 {
+                let tw = (w - 2.0 * M) * 0.42;
+                HalfGeo { room: (w * 0.04, ry, w * 0.92, rh),
+                          tiles: [(M, ry - th, tw, th), (w - M - tw, ry - th, tw, th), (M, ry + rh, tw, th), (w - M - tw, ry + rh, tw, th)],
+                          head_top: 56, band: None }
+            } else {
+                let bottom = h - ch - 12.0;
+                let tw = ((w - 2.0 * M) * 0.24).max(150.0);
+                let (rx, rw) = (M + tw * 0.6, w - 2.0 * (M + tw * 0.6));
+                HalfGeo { room: (rx, below_title, rw, bottom - below_title),
+                          tiles: [(M, below_title, tw, th), (w - M - tw, below_title, tw, th), (M, bottom - th, tw, th), (w - M - tw, bottom - th, tw, th)],
+                          head_top: 56, band: None }
+            }
+        }
+        _ => {
+            let top = h - ch - rows_h(10.0) - 12.0;
+            let ry = h * 0.22;
+            HalfGeo { room: (0.0, ry, w, (top - ry + 30.0).max(120.0)), tiles: grid(top, 10.0), head_top: 56, band: None }
+        }
+    }
 }
 
 /// How the sound choices and the cover are laid out (Look and feel).
@@ -376,6 +492,15 @@ pub struct Stage {
     head_now: RefCell<Head>,
     layout: Cell<Layout>,
     compact: Cell<bool>,
+    /// Half a screen (900–1200 wide, 600+ tall, e.g. Meta+Left on a 1920
+    /// screen): the theme's own layout (round 125). The theme's id, or empty.
+    half: RefCell<String>,
+    /// The four sound choices as tiles (half a screen only), and the red band
+    /// behind the title (Screenprint's).
+    tiles: Vec<gtk::Box>,
+    band: gtk::Box,
+    /// Where the room and the tiles are drawn now (page pixels), half a screen only.
+    half_geo: Cell<Option<HalfGeo>>,
     /// The window is small: the page asks for the compact view.
     pub small: Cell<bool>,
     pub on_pick: Cb,
@@ -412,8 +537,23 @@ fn speaker_icon() -> gtk::DrawingArea {
 
 /// The design's chevron after a word you can change: half the word's size,
 /// a thin red stroke sitting on its baseline.
+/// The first label inside a widget (a choice's word inside its button).
+fn first_label(w: &gtk::Widget) -> Option<gtk::Label> {
+    if let Some(l) = w.downcast_ref::<gtk::Label>() {
+        return Some(l.clone());
+    }
+    let mut c = w.first_child();
+    while let Some(x) = c {
+        if let Some(l) = first_label(&x) {
+            return Some(l);
+        }
+        c = x.next_sibling();
+    }
+    None
+}
+
 pub(crate) fn chevron(word: &gtk::Label) -> gtk::DrawingArea {
-    let a = gtk::DrawingArea::builder().content_width(12).build();
+    let a = gtk::DrawingArea::builder().content_width(12).css_classes(["chev"]).build();
     let wk = word.downgrade();
     a.set_draw_func(move |a, cr, _, _| {
         let Some(v) = wk.upgrade() else { return };
@@ -430,7 +570,8 @@ pub(crate) fn chevron(word: &gtk::Label) -> gtk::DrawingArea {
         }
         let k = s / 24.0;
         let y0 = base - 0.06 * em - s;
-        cr.set_source_rgb(1.0, 75.0 / 255.0, 83.0 / 255.0);
+        let c = a.color();
+        cr.set_source_rgba(c.red() as f64, c.green() as f64, c.blue() as f64, c.alpha() as f64);
         cr.set_line_width(3.4 * k);
         cr.set_line_cap(gtk::cairo::LineCap::Round);
         cr.set_line_join(gtk::cairo::LineJoin::Round);
@@ -465,6 +606,30 @@ impl Stage {
         root.add_overlay(&shade);
         let room = gtk::DrawingArea::builder().hexpand(true).vexpand(true).build();
         root.add_overlay(&room);
+        // Half a screen: Screenprint's red band, then the four tiles, above the room.
+        let band = gtk::Box::builder().css_classes(["hband"]).halign(gtk::Align::Fill).valign(gtk::Align::Start).visible(false).can_target(false).build();
+        root.add_overlay(&band);
+        let tiles: Vec<gtk::Box> = (0..4).map(|_| {
+            let t = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).css_classes(["tile"])
+                .halign(gtk::Align::Start).valign(gtk::Align::Start).visible(false).build();
+            root.add_overlay(&t);
+            // A press anywhere on the tile opens its choices.
+            let g = gtk::GestureClick::new();
+            let tw = t.downgrade();
+            g.connect_released(move |_, _, _, _| {
+                let Some(t) = tw.upgrade() else { return };
+                let mut c = t.last_child().and_then(|b| b.first_child());
+                while let Some(w) = c {
+                    if let Some(mb) = w.downcast_ref::<gtk::MenuButton>() {
+                        mb.popup();
+                        return;
+                    }
+                    c = w.first_child();
+                }
+            });
+            t.add_controller(g);
+            t
+        }).collect();
         // Filled, with margins on all four sides: exactly the screen's rectangle (a
         // GtkPicture would otherwise ask for the video's own size).
         let video = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).can_shrink(true).halign(gtk::Align::Fill)
@@ -614,7 +779,7 @@ impl Stage {
         let tech = lbl("", &["tech"]);
         let hint = lbl("tap a speaker to test it", &["hint"]);
         hint.set_margin_bottom(6);
-        let low = gtk::Box::builder().spacing(16).build();
+        let low = gtk::Box::builder().spacing(16).css_classes(["low"]).build();
         low.append(&dock_line);
         low.append(&ctl);
         let dock = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["dock"]).valign(gtk::Align::End).build();
@@ -642,6 +807,7 @@ impl Stage {
             fluid_css, fluid_now: RefCell::new(String::new()), anchor: Cell::new(0.38), head_w: Cell::new(300),
             cover: RefCell::new(None), tall_cover: Cell::new(false), fields: RefCell::new(vec![]), head_now: RefCell::new(Head::default()),
             layout: Cell::new(Layout::SlimBig), compact: Cell::new(false), small: Cell::new(false), on_pick: RefCell::new(None), on_action: RefCell::new(None),
+            half: RefCell::new(String::new()), tiles, band, half_geo: Cell::new(None),
         });
         {
             let send = |wk: std::rc::Weak<Stage>| -> Rc<dyn Fn(&str)> { Rc::new(move |a: &str| if let Some(s) = wk.upgrade() {
@@ -718,7 +884,7 @@ impl Stage {
     /// The ticket band for a film or series (none for other pages, or in the
     /// compact view): it takes the place of the kicker and the top-right corner.
     pub fn set_ticket(&self, t: Option<Ticket>) {
-        let t = t.filter(|_| !self.compact.get());
+        let t = t.filter(|_| !self.compact.get() && !self.is_half());
         if *self.ticket_now.borrow() == t {
             return;
         }
@@ -746,6 +912,10 @@ impl Stage {
     /// Places the title block as the design does: 54% of its height above
     /// the anchor line, but never above the top margin (or the ticket band).
     fn set_head_top(&self) {
+        if self.is_half() {
+            self.place_half();
+            return;
+        }
         let h = self.root.height();
         let base = if self.compact.get() { 56 } else if h < 720 { 58 } else { 78 };
         let min = base + if self.ticket.is_visible() { if h < 720 { 52 } else { 66 } } else { 0 };
@@ -819,8 +989,9 @@ impl Stage {
     fn show_shed(&self) {
         let n = self.shed.borrow().len();
         let h = self.head_now.borrow();
-        self.bio.set_visible(!h.bio.is_empty() && n < 1);
-        self.fsbtn.set_visible(h.button.is_some() && n < 2);
+        let half = self.is_half();
+        self.bio.set_visible(!half && !h.bio.is_empty() && n < 1);
+        self.fsbtn.set_visible(!half && h.button.is_some() && n < 2);
     }
 
     fn act(&self, a: &str) {
@@ -861,19 +1032,19 @@ impl Stage {
         let wf = w as f64;
         let hw = if self.compact.get() {
             if w > 560 { wf - (wf * 0.42).min(h as f64 * 0.5).min(460.0) - 48.0 } else { wf * 0.92 }
-        } else { wf * 0.44 }.clamp(260.0, 780.0) as i32;
+        } else if self.is_half() { wf - 72.0 } else { wf * 0.44 }.clamp(260.0, 780.0) as i32;
         // The block is as wide as what's in it, up to hw (the design's
         // max-width: min(44vw, 780px)); the compact view fills its width.
         self.head_w.set(hw);
         self.head.set_width_request(if self.compact.get() { hw } else { -1 });
         self.fit_title_width();
-        let m = if self.compact.get() { 18 } else if w < 1060 { 24 } else { 46 };
+        let m = if self.compact.get() { 18 } else if self.is_half() { 36 } else if w < 1060 { 24 } else { 46 };
         for wd in [self.head.upcast_ref::<gtk::Widget>(), self.rows.upcast_ref()] {
             wd.set_margin_start(m);
         }
         self.bigart.area.set_margin_start(m - 14);
         // Very narrow: no big number at the top (the readout says it), slimmer controls.
-        self.corner.set_visible(!self.compact.get() || w >= 640);
+        self.corner.set_visible(!self.is_half() && (!self.compact.get() || w >= 640));
         self.readout_btn.set_visible(w >= 520);
         self.test.set_visible(w >= 600);
         self.volume.set_width_request(if w < 520 { 70 } else { 100 });
@@ -909,6 +1080,9 @@ impl Stage {
                     self.refill_later();
                 }
             }
+        }
+        if self.is_half() {
+            self.place_half();
         }
         // The artist line stands 0.35 of its size below the title.
         self.subtitle.set_margin_top(if self.compact.get() { 4 } else { (artist_px * 0.35).round() as i32 });
@@ -948,6 +1122,11 @@ impl Stage {
             });
             *self.bg_timer.borrow_mut() = Some(id);
         }
+    }
+
+    /// The background photo showing now (printed in red), for the speaker test.
+    pub fn bg_paintable(&self) -> Option<gtk::gdk::Paintable> {
+        self.bg_pics[self.bg_flip.get() as usize].paintable()
     }
 
     fn show_bg(&self, i: usize) {
@@ -1027,6 +1206,7 @@ impl Stage {
             None => self.fsbtn.set_visible(false),
         }
         *self.head_now.borrow_mut() = h.clone();
+        self.show_head_parts(h);
         // Re-place it once the new words are laid out.
         let wk = Rc::downgrade(self);
         glib::timeout_add_local_once(Duration::from_millis(40), move || if let Some(s) = wk.upgrade() { s.set_head_top() });
@@ -1107,6 +1287,129 @@ impl Stage {
         self.layout.get()
     }
 
+    /// Half a screen in this theme's layout, or the full page (None).
+    pub fn set_half(self: &Rc<Self>, theme: Option<&str>) -> bool {
+        let t = theme.unwrap_or("").to_string();
+        if *self.half.borrow() == t {
+            return false;
+        }
+        for c in ["half", "half-oys", "half-blueprint", "half-screenprint", "half-callouts"] {
+            self.root.remove_css_class(c);
+        }
+        if !t.is_empty() {
+            self.root.add_css_class("half");
+            self.root.add_css_class(&format!("half-{t}"));
+        }
+        *self.half.borrow_mut() = t;
+        let (w, h) = (self.root.width(), self.root.height());
+        if w > 0 && h > 0 {
+            self.resized(w, h);
+        }
+        self.place_half();
+        self.place_cover();
+        let f = self.fields.borrow().clone();
+        self.fields.borrow_mut().clear();
+        self.set_fields(f, &self.tech.label());
+        let h = self.head_now.borrow().clone();
+        self.show_head_parts(&h);
+        true
+    }
+
+    pub fn is_half(&self) -> bool {
+        !self.half.borrow().is_empty()
+    }
+
+    /// Where the room and the tiles go on half a screen (None on the full page).
+    pub fn half_geo(&self) -> Option<HalfGeo> {
+        self.half_geo.get()
+    }
+
+    /// Puts the tiles, the band, the title and the controls where the theme's
+    /// half-screen layout wants them, for the page's size now.
+    fn place_half(&self) {
+        let half = self.half.borrow().clone();
+        let (w, h) = (self.root.width(), self.root.height());
+        let on = !half.is_empty() && w > 0 && h > 0;
+        for t in &self.tiles {
+            t.set_visible(on && t.first_child().is_some());
+        }
+        let ch = self.dock.measure(gtk::Orientation::Vertical, w).1 as f64;
+        let th = self.tiles.iter().filter(|t| t.first_child().is_some())
+            .map(|t| t.measure(gtk::Orientation::Vertical, -1).1 - t.margin_top() - t.margin_bottom()).max().unwrap_or(70) as f64;
+        let head_h = self.head.measure(gtk::Orientation::Vertical, (w - 72).max(200)).1 - self.head.margin_top() - self.head.margin_bottom();
+        let g = on.then(|| half_geo(&half, w as f64, h as f64, ch, th, head_h as f64));
+        self.half_geo.set(g);
+        let from_right = matches!(half.as_str(), "blueprint" | "callouts");
+        if let Some(g) = g {
+            self.fit_tile_words(&g);
+        }
+        for (i, t) in self.tiles.iter().enumerate() {
+            if let Some(g) = g {
+                let (x, y, tw, _) = g.tiles[i];
+                t.set_margin_start(x.round() as i32);
+                t.set_margin_top(y.round() as i32);
+                t.set_size_request(tw.round() as i32, -1);
+                let a = if from_right && x > w as f64 / 2.0 { gtk::Align::End } else { gtk::Align::Start };
+                let mut c = t.first_child();
+                while let Some(w) = c {
+                    w.set_halign(a);
+                    c = w.next_sibling();
+                }
+            }
+        }
+        match g.and_then(|g| g.band) {
+            Some((y, bh)) => {
+                self.band.set_margin_top(y.round() as i32);
+                self.band.set_size_request(-1, bh.round() as i32);
+                self.band.set_visible(true);
+            }
+            None => self.band.set_visible(false),
+        }
+        // The controls across the bottom, the choices above them (not in the dock line).
+        self.ctl.set_halign(if on { gtk::Align::Center } else { gtk::Align::End });
+        self.hint.set_visible(!on);
+        self.corner.set_visible(!on && (!self.compact.get() || w >= 640));
+        if let Some(g) = g {
+            self.head.set_margin_top(g.head_top);
+            self.head.set_width_request((w - 2 * 36).max(200));
+        }
+    }
+
+    /// Each tile's word fits its tile: the whole phrase, else the phrase before
+    /// the comma (as the Strip says it), else cut short with "…".
+    fn fit_tile_words(&self, g: &HalfGeo) {
+        let fields = self.fields.borrow();
+        for (i, (t, f)) in self.tiles.iter().zip(fields.iter()).enumerate() {
+            let Some(l) = t.last_child().and_then(|v| first_label(&v)) else { continue };
+            let pad = if *self.half.borrow() == "callouts" { 0 } else { 34 };
+            let avail = g.tiles[i].2 as i32 - pad - 20;
+            l.set_ellipsize(gtk::pango::EllipsizeMode::None);
+            l.set_max_width_chars(-1);
+            l.set_label(&f.value);
+            if l.measure(gtk::Orientation::Horizontal, -1).1 > avail {
+                l.set_label(&crate::mini::short(f));
+                l.set_tooltip_text(Some(&f.value));
+            } else {
+                l.set_tooltip_text(None);
+            }
+            if l.measure(gtk::Orientation::Horizontal, -1).1 > avail {
+                let m = l.pango_context().metrics(None, None);
+                let cw = (m.approximate_char_width() as f64 / gtk::pango::SCALE as f64).max(1.0);
+                l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                l.set_max_width_chars(((avail as f64 / cw).floor() as i32).max(4));
+            }
+        }
+    }
+
+    /// On half a screen the title block keeps its kicker, title and artist (or
+    /// "year · app" line); the credits, bio, facts and full-screen button go.
+    fn show_head_parts(&self, h: &Head) {
+        let full = !self.is_half() && !self.compact.get();
+        self.credits.set_visible(full && !h.credits.is_empty() && h.line.is_empty());
+        self.facts.set_visible(full && !h.facts.is_empty());
+        self.show_shed();
+    }
+
     fn place_cover(&self) {
         let cover = self.cover.borrow().clone();
         let l = self.layout.get();
@@ -1115,10 +1418,11 @@ impl Stage {
         // The big cover needs 90 px under the title block; a shorter window
         // shows it by the title instead.
         let room = self.cover_room.get() - 16.0;
-        let big = cover.is_some() && !split && l == Layout::SlimBig && !compact;
-        let by_title = cover.is_some() && !split && (l.cover_by_title() || l == Layout::Bar || compact || (big && room < 90.0));
+        let half = self.is_half();
+        let big = cover.is_some() && !split && l == Layout::SlimBig && !compact && !half;
+        let by_title = cover.is_some() && !split && !half && (l.cover_by_title() || l == Layout::Bar || compact || (big && room < 90.0));
         let big = big && room >= 90.0;
-        let in_rows = cover.is_some() && !split && l == Layout::Rows && !compact;
+        let in_rows = cover.is_some() && !split && l == Layout::Rows && !compact && !half;
         let h = self.root.height().max(600) as f64;
         let sz = if compact { 96.0 } else { (h * 0.16).clamp(96.0, 150.0) };
         self.sleeve.set(cover.clone().filter(|_| by_title));
@@ -1205,6 +1509,26 @@ impl Stage {
         }
         let l = self.layout.get();
         let compact = self.compact.get();
+        let half = self.is_half();
+        for t in &self.tiles {
+            while let Some(c) = t.first_child() {
+                t.remove(&c);
+            }
+        }
+        if half {
+            // Half a screen: each choice is a tile (its label, then its word), placed by the theme.
+            self.rows.set_visible(false);
+            self.bar.set_visible(false);
+            self.dock_line.set_visible(false);
+            for (t, f) in self.tiles.iter().zip(fields.iter()) {
+                t.append(&lbl(&f.label.to_uppercase(), &["f-l"]));
+                let v = self.value_widget(f, false);
+                v.set_halign(gtk::Align::Start);
+                t.append(&v);
+            }
+            self.place_half();
+            return;
+        }
         let rows = (l.rows() || compact) && !fields.is_empty();
         let bar = l == Layout::Bar && !compact;
         let slim = !rows && !bar;
@@ -1338,6 +1662,35 @@ impl Stage {
         b.upcast()
     }
 
+    /// The title block's and the controls' boxes on the page (for the self-test).
+    pub fn head_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        let b = self.head.compute_bounds(&self.root)?;
+        Some((b.x() as f64, b.y() as f64, b.width() as f64, b.height() as f64))
+    }
+
+    pub fn dock_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        let b = self.low_sw.compute_bounds(&self.root)?;
+        Some((b.x() as f64, b.y() as f64, b.width() as f64, b.height() as f64))
+    }
+
+    /// The word a sound choice shows now.
+    pub fn field_value(&self, key: &str) -> Option<String> {
+        self.fields.borrow().iter().find(|f| f.key == key).map(|f| f.value.clone())
+    }
+
+    /// The keys of the sound choices showing now, in order.
+    pub fn field_keys(&self) -> Vec<String> {
+        self.fields.borrow().iter().map(|f| f.key.to_string()).collect()
+    }
+
+    /// Half a screen: each tile's box and its word's box, in `to`'s pixels.
+    pub fn tile_rects(&self, to: &impl IsA<gtk::Widget>) -> Vec<((f64, f64, f64, f64), (f64, f64, f64, f64))> {
+        let r = |b: gtk::graphene::Rect| (b.x() as f64, b.y() as f64, b.width() as f64, b.height() as f64);
+        self.tiles.iter().filter(|t| t.is_visible())
+            .filter_map(|t| Some((r(t.compute_bounds(to)?), r(t.last_child()?.first_child()?.compute_bounds(to)?))))
+            .collect()
+    }
+
     /// The labels of the sound choices showing now (for the self-test).
     pub fn field_labels(&self) -> Vec<String> {
         self.fields.borrow().iter().map(|f| f.label.clone()).collect()
@@ -1381,6 +1734,38 @@ impl<W: IsA<gtk::Widget>> Unparent for W {
                 b.remove(self);
             } else {
                 self.unparent();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Half a screen at its usual sizes: the tiles stay apart, under the title,
+    /// above the controls and inside the window, in every theme.
+    #[test]
+    fn half_screen_layouts_keep_apart() {
+        let meets = |a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)| a.0 < b.0 + b.2 && b.0 < a.0 + a.2 && a.1 < b.1 + b.3 && b.1 < a.1 + a.3;
+        for theme in ["oys", "blueprint", "screenprint", "callouts"] {
+            for (w, h) in [(900.0, 600.0), (960.0, 1032.0), (1000.0, 650.0), (1199.0, 900.0), (1100.0, 760.0)] {
+                let (ch, th, head_h) = (85.0, 72.0, 150.0);
+                let g = half_geo(theme, w, h, ch, th, head_h);
+                let head = (36.0, g.head_top as f64, w - 72.0, head_h);
+                for (i, t) in g.tiles.iter().enumerate() {
+                    assert!(t.0 >= 0.0 && t.0 + t.2 <= w && t.1 + t.3 <= h - ch + 1.0, "{theme} {w}x{h}: tile {i} {t:?}");
+                    if theme != "screenprint" {
+                        assert!(!meets(*t, head), "{theme} {w}x{h}: tile {i} {t:?} on the title");
+                    }
+                    for (j, o) in g.tiles.iter().enumerate().skip(i + 1) {
+                        assert!(!meets(*t, *o), "{theme} {w}x{h}: tiles {i} and {j}");
+                    }
+                }
+                if let Some((y, bh)) = g.band {
+                    assert!(g.tiles.iter().all(|t| t.1 >= y + bh), "{theme} {w}x{h}: the band runs into the tiles");
+                }
+                assert!(g.room.2 > 200.0 && g.room.3 > 150.0, "{theme} {w}x{h}: room {:?}", g.room);
             }
         }
     }

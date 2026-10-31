@@ -215,6 +215,10 @@ fn level(sc: &Scene, i: usize) -> f64 {
 /// Fit a block of `half_w` local units across the page: returns (centre x, scale). The room sits at
 /// x = w * 0.70, never left of `left_clip` (nor, without a clip, into the text on the left `text_frac`).
 fn fit(w: f64, clip: f64, half_w: f64, k0: f64, text_frac: f64) -> (f64, f64) {
+    if text_frac < 0.0 {
+        // The room's own box (half a screen): centred, as big as fits.
+        return (w * 0.5, k0.min((w - 20.0) / (2.0 * half_w)));
+    }
     let pad = 10.0;
     let left = clip.max(w * text_frac) + pad;
     let right = w - pad;
@@ -511,7 +515,7 @@ fn bp_pos(i: usize) -> (f64, f64) {
 }
 
 fn blueprint(cr: &Context, w: f64, h: f64, sc: &Scene, ez: &Ez) -> Layout {
-    let (cx, k) = fit(w, sc.left_clip, 270.0, h * 0.58 / 440.0, 0.44);
+    let (cx, k) = if sc.fill { fit(w, 0.0, 270.0, h * 0.94 / 440.0, -1.0) } else { fit(w, sc.left_clip, 270.0, h * 0.58 / 440.0, 0.44) };
     let cy = h * 0.50;
     let (ox, oy) = (cx - 300.0 * k, cy - 260.0 * k);
     let p = |x: f64, y: f64| (ox + x * k, oy + y * k);
@@ -866,16 +870,17 @@ fn callouts(cr: &Context, w: f64, h: f64, sc: &Scene, ez: &Ez) -> Layout {
     // the labels hang out past the room by a fixed number of pixels, so fit the room around them
     let (cx, s) = {
         let pad = 10.0;
-        let left = sc.left_clip.max(w * 0.44) + pad;
+        let left = if sc.fill { pad } else { sc.left_clip.max(w * 0.44) + pad };
         let right = w - pad;
         let ext = 8.6 * fs + 12.0;
-        let mut s = h * 0.60 / (6.0 + wall_h);
+        let mut s = h * if sc.fill { 0.86 } else { 0.60 } / (6.0 + wall_h);
         let avail = (right - left) / 2.0;
         if 5.45 * s + ext > avail {
             s = ((avail - ext) / 5.45).max(8.0);
         }
         let hw = 5.45 * s + ext;
-        ((w * 0.70).clamp(left + hw, (right - hw).max(left + hw)), s)
+        let at = if sc.fill { 0.5 } else { 0.70 };
+        ((w * at).clamp(left + hw, (right - hw).max(left + hw)), s)
     };
     let iso = Iso { ox: cx, oy: h * 0.5 + 1.5 * s, s };
     let mut lay = Layout::default();
@@ -1429,7 +1434,7 @@ fn floor_dots(cr: &Context, cam: &Cam, rad: f64, half: f64, amp: f64, col: Rgb, 
 
 fn screenprint(cr: &Context, w: f64, h: f64, sc: &Scene, ez: &Ez) -> Layout {
     let kk = (h.min(w * 0.5625) / 900.0).max(0.2);
-    let (cx, kk) = fit(w, sc.left_clip, 450.0, kk, 0.34);
+    let (cx, kk) = if sc.fill { fit(w, 0.0, 450.0, kk, -1.0) } else { fit(w, sc.left_clip, 450.0, kk, 0.34) };
     let cam = Cam { cx, f: 1356.0 * kk, yh: -70.0 * kk + (h - 900.0 * kk) * 0.45 };
     let wz = ez.wz;
     let zb = -wz;
@@ -1441,7 +1446,7 @@ fn screenprint(cr: &Context, w: f64, h: f64, sc: &Scene, ez: &Ez) -> Layout {
 
     // the left part of the room fades out into the text side
     let xbl = cam.p(-SP_HALF, 0.0, zb).0;
-    let fade = Fade { x0: (xbl - 0.14 * w).max(sc.left_clip), x1: xbl.max(sc.left_clip + 40.0) };
+    let fade = if sc.fill { Fade { x0: -2.0, x1: -1.0 } } else { Fade { x0: (xbl - 0.14 * w).max(sc.left_clip), x1: xbl.max(sc.left_clip + 40.0) } };
 
     // tones: the page red, darkened
     let (floor_c, side_c, back_c) = match place {
@@ -1964,6 +1969,7 @@ mod tests {
             },
             left_clip: 0.0,
             corner: None,
+            fill: false,
         }
     }
 

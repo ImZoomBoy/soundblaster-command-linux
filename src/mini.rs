@@ -590,7 +590,9 @@ pub struct Strip {
     artist: gtk::Label,
     ro: gtk::Label,
     pub spk: gtk::DrawingArea,
-    choices: gtk::Box,
+    /// The four choices: in a row, or two by two in a taller Strip.
+    choices: gtk::Grid,
+    cols: Cell<i32>,
     pub prev: gtk::Button,
     pub pp: gtk::Button,
     pub next: gtk::Button,
@@ -599,6 +601,15 @@ pub struct Strip {
     pub menu: gtk::MenuButton,
     fields: RefCell<Vec<Field>>,
     send: Send,
+    volume: gtk::Scale,
+    /// What may go when the window is narrow, the first first.
+    drop: Vec<gtk::Widget>,
+    /// The size laid out for, and sizes that follow the window's height.
+    size: Cell<(i32, i32)>,
+    fluid: gtk::CssProvider,
+    fluid_now: RefCell<String>,
+    fit_queued: Cell<bool>,
+    me: RefCell<std::rc::Weak<Strip>>,
 }
 
 impl Strip {
@@ -611,8 +622,11 @@ impl Strip {
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
         let artist = lbl("", &["s-artist"]);
         artist.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        let info = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).margin_start(14).margin_end(12)
-            .width_request(156).build();
+        title.set_width_chars(6);
+        title.set_max_width_chars(16);
+        artist.set_width_chars(6);
+        artist.set_max_width_chars(18);
+        let info = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).margin_start(14).margin_end(12).build();
         info.append(&title);
         info.append(&artist);
         let ro = lbl("", &["s-ro"]);
@@ -621,7 +635,7 @@ impl Strip {
         let spk = gtk::DrawingArea::builder().hexpand(true).build();
         spk.set_tooltip_text(Some("Tap a speaker to test it"));
         spk.set_size_request(160, -1);
-        let choices = gtk::Box::builder().spacing(2).margin_start(6).margin_end(6).valign(gtk::Align::Center).build();
+        let choices = gtk::Grid::builder().column_spacing(2).row_spacing(2).margin_start(6).margin_end(6).valign(gtk::Align::Center).build();
         let prev = icon_btn("media-skip-backward-symbolic", "Previous", "flat-t");
         let pp = icon_btn("media-playback-pause-symbolic", "Play / pause", "pp");
         let next = icon_btn("media-skip-forward-symbolic", "Next", "flat-t");
@@ -634,7 +648,8 @@ impl Strip {
         let menu = gtk::MenuButton::builder().icon_name("open-menu-symbolic").tooltip_text("Menu").css_classes(["round"])
             .valign(gtk::Align::Center).build();
         // As on the page: play, the readout, headphones, the volume; then the pin and ☰.
-        let ctl = gtk::Box::builder().spacing(6).css_classes(["s-ctl"]).margin_start(12).margin_end(12).valign(gtk::Align::Center).build();
+        let ctl = gtk::Box::builder().spacing(6).css_classes(["s-ctl"]).margin_start(12).margin_end(12).valign(gtk::Align::Center)
+            .hexpand(true).halign(gtk::Align::End).build();
         for w in [prev.upcast_ref::<gtk::Widget>(), pp.upcast_ref(), next.upcast_ref(), ro.upcast_ref(), hp.upcast_ref(), volume.upcast_ref(),
                   pin.upcast_ref(), menu.upcast_ref()] {
             ctl.append(w);
@@ -642,12 +657,29 @@ impl Strip {
         // The window's own buttons in a group of their own, apart from the rest.
         let wc = gtk::WindowControls::builder().side(gtk::PackType::End).decoration_layout(":minimize,close").css_classes(["s-wc"])
             .valign(gtk::Align::Center).margin_start(10).margin_end(10).build();
+        // The middle scrolls sideways rather than holding the window wide: any
+        // width can be dragged to, and the parts that don't fit are put away
+        // (`fit`), so nothing is ever cut off.
+        let (spk_sep, ch_sep) = (sep(), sep());
+        let mid = gtk::Box::builder().hexpand(true).build();
+        for w in [spk.upcast_ref::<gtk::Widget>(), spk_sep.upcast_ref(), choices.upcast_ref(), ch_sep.upcast_ref(), ctl.upcast_ref()] {
+            mid.append(w);
+        }
+        let mid_sw = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::External).vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_width(true).propagate_natural_height(true).hexpand(true).child(&mid).build();
         let root = gtk::Box::builder().css_classes(["strip"]).hexpand(true).vexpand(true).build();
-        for w in [cover.area.upcast_ref::<gtk::Widget>(), info.upcast_ref(), sep().upcast_ref(), spk.upcast_ref(), sep().upcast_ref(),
-                  choices.upcast_ref(), sep().upcast_ref(), ctl.upcast_ref(), sep().upcast_ref(), wc.upcast_ref()] {
+        for w in [cover.area.upcast_ref::<gtk::Widget>(), info.upcast_ref(), sep().upcast_ref(), mid_sw.upcast_ref(), sep().upcast_ref(), wc.upcast_ref()] {
             root.append(w);
         }
-        let s = Rc::new(Strip { root, cover, title, artist, ro, spk, choices, prev, pp, next, hp, pin, menu, fields: RefCell::new(vec![]), send: RefCell::new(None) });
+        let drop: Vec<gtk::Widget> = vec![spk.clone().upcast(), spk_sep.upcast(), ro.clone().upcast(), choices.clone().upcast(), ch_sep.upcast(),
+            volume.clone().upcast(), pin.clone().upcast(), prev.clone().upcast(), next.clone().upcast(), hp.clone().upcast(), info.clone().upcast()];
+        let fluid = gtk::CssProvider::new();
+        if let Some(d) = gtk::gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(&d, &fluid, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+        }
+        let s = Rc::new(Strip { root, cover, title, artist, ro, spk, choices, cols: Cell::new(4), prev, pp, next, hp, pin, menu, fields: RefCell::new(vec![]), send: RefCell::new(None),
+            volume, drop, size: Cell::new((0, 0)), fluid, fluid_now: RefCell::new(String::new()), fit_queued: Cell::new(false), me: RefCell::new(std::rc::Weak::new()) });
+        *s.me.borrow_mut() = Rc::downgrade(&s);
         for (b, a) in [(&s.prev, "prev"), (&s.pp, "pp"), (&s.next, "next")] {
             let wk = Rc::downgrade(&s);
             b.connect_clicked(move |_| if let Some(s) = wk.upgrade() { s.emit(&format!("act:{a}")) });
@@ -670,26 +702,110 @@ impl Strip {
         if let Some(f) = f { f(a) }
     }
 
+    /// The Strip in any window under 300 px tall: 76 px is the design's bar;
+    /// taller, the cover grows to the full height (up to a third of the
+    /// width) and the words and buttons grow with it.
+    pub fn resized(self: &Rc<Self>, w: i32, h: i32) {
+        if self.size.replace((w, h)) == (w, h) {
+            return;
+        }
+        let k = (h as f64 / 76.0).sqrt().clamp(1.0, 1.6);
+        let kb = 1.0 + (k - 1.0) * 0.5;
+        let cols = if h >= 140 { 2 } else { 4 };
+        if self.cols.replace(cols) != cols {
+            self.place_choices();
+        }
+        let cs = h.min(w / 4).clamp(56, 300);
+        self.cover.area.set_content_width(cs);
+        self.cover.area.set_size_request(cs, -1);
+        self.spk.set_size_request((160.0 * k) as i32, -1);
+        self.volume.set_width_request((64.0 * kb) as i32);
+        let px = |v: f64| (v * k * 2.0).round() / 2.0;
+        let bt = |v: f64| (v * kb).round();
+        let rules = format!(".strip .s-title {{ font-size: {}px; }} .strip .s-artist {{ font-size: {}px; }}\n\
+            .strip .c-v {{ font-size: {}px; }} .strip .c-l {{ font-size: {}px; }} .strip .s-ro {{ font-size: {}px; }}\n\
+            .strip .s-ctl button.round, .strip .s-ctl menubutton.round > button {{ min-width: {b}px; min-height: {b}px; }}\n\
+            .strip .s-ctl button.pp {{ min-width: {p}px; min-height: {p}px; }}\n\
+            .strip .s-ctl button.flat-t {{ min-width: {f}px; min-height: {f}px; }}",
+            px(19.0), px(13.5), px(15.0), px(8.5), (11.5 * kb * 2.0).round() / 2.0, b = bt(30.0), p = bt(36.0), f = bt(26.0));
+        if *self.fluid_now.borrow() != rules {
+            self.fluid.load_from_string(&rules);
+            *self.fluid_now.borrow_mut() = rules;
+        }
+        self.fit();
+        self.queue_fit();
+    }
+
+    /// Fits again once new words or sizes are styled.
+    fn queue_fit(&self) {
+        if self.fit_queued.replace(true) {
+            return;
+        }
+        let wk = self.me.borrow().clone();
+        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(60), move || if let Some(s) = wk.upgrade() {
+            s.fit_queued.set(false);
+            s.fit();
+        });
+    }
+
+    /// Shows everything, then puts parts away (the cabinets first, then the
+    /// readout, the choices, the volume, the pin, ⏮ ⏭, headphones, the title)
+    /// until the rest fits the width.
+    pub fn fit(&self) {
+        let (w, _) = self.size.get();
+        if w <= 0 {
+            return;
+        }
+        for d in &self.drop {
+            d.set_visible(true);
+        }
+        self.artist.set_visible(!self.artist.label().is_empty());
+        let need = |s: &Self| s.root.measure(gtk::Orientation::Horizontal, -1).1;
+        let mut i = 0;
+        while need(self) > w && i < self.drop.len() {
+            self.drop[i].set_visible(false);
+            // The separator goes with what it stands beside.
+            if i == 0 || i == 3 {
+                self.drop[i + 1].set_visible(false);
+                i += 1;
+            }
+            i += 1;
+        }
+    }
+
+    /// The parts of the Strip showing now (for the self-test).
+    pub fn shows(&self) -> Vec<&'static str> {
+        let names = ["cabinets", "", "readout", "choices", "", "volume", "pin", "skip", "next", "headphones", "title"];
+        self.drop.iter().zip(names).filter(|(d, n)| !n.is_empty() && d.is_visible()).map(|(_, n)| n).collect()
+    }
+
     pub fn set_head(&self, h: &Head) {
         self.title.set_label(&h.title);
         self.artist.set_label(&h.subtitle);
         self.artist.set_visible(!h.subtitle.is_empty());
+        self.queue_fit();
     }
 
     pub fn set_cover(&self, s: Option<ImageSurface>) {
         self.cover.area.set_visible(s.is_some());
         self.cover.set(s);
+        self.queue_fit();
     }
 
     pub fn set_readout(&self, read: &str) {
-        self.ro.set_label(read);
+        if self.ro.label() != read {
+            self.ro.set_label(read);
+            self.queue_fit();
+        }
     }
 
     pub fn set_fields(self: &Rc<Self>, fields: &[Field]) {
         if *self.fields.borrow() == fields { return; }
         *self.fields.borrow_mut() = fields.to_vec();
         while let Some(c) = self.choices.first_child() { self.choices.remove(&c); }
-        for f in fields {
+        for (i, f) in fields.iter().enumerate() {
+            let i = i as i32;
+            let cols = self.cols.get();
             let col = gtk::Box::builder().orientation(gtk::Orientation::Vertical).width_request(60).build();
             col.append(&lbl(&f.label.to_uppercase(), &["c-l"]));
             let v = lbl(&short(f), &["c-v"]);
@@ -701,7 +817,7 @@ impl Strip {
                 let b = gtk::Box::builder().css_classes(["s-choice"]).tooltip_text(tip).build();
                 let bt = gtk::Button::builder().child(&col).can_target(false).build();
                 b.append(&bt);
-                self.choices.append(&b);
+                self.choices.attach(&b, i % cols, i / cols, 1, 1);
                 continue;
             }
             // The options drop out of the bar (a popover may reach past a thin window).
@@ -728,7 +844,22 @@ impl Strip {
             let mb = gtk::MenuButton::builder().child(&col).popover(&pop).tooltip_text(tip).build();
             let b = gtk::Box::builder().css_classes(["s-choice"]).build();
             b.append(&mb);
-            self.choices.append(&b);
+            self.choices.attach(&b, i % cols, i / cols, 1, 1);
+        }
+        self.queue_fit();
+    }
+
+    /// Lays the choices out again for the number of columns now.
+    fn place_choices(&self) {
+        let mut kids = vec![];
+        while let Some(c) = self.choices.first_child() {
+            self.choices.remove(&c);
+            kids.push(c);
+        }
+        let cols = self.cols.get();
+        for (i, c) in kids.iter().enumerate() {
+            let i = i as i32;
+            self.choices.attach(c, i % cols, i / cols, 1, 1);
         }
     }
 

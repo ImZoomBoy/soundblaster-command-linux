@@ -59,7 +59,7 @@ impl ksni::Tray for Tray {
         "Sound Blaster Command".into()
     }
     fn icon_name(&self) -> String {
-        crate::APP_ID.into()
+        crate::ICON.into()
     }
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip { title: "Sound Blaster Command".into(), description: self.summary(), ..Default::default() }
@@ -144,7 +144,7 @@ impl ksni::Tray for Tray {
         items.push(MenuItem::Separator);
         items.push(StandardItem {
             label: "Open Sound Blaster Command".into(),
-            icon_name: crate::APP_ID.into(),
+            icon_name: crate::ICON.into(),
             activate: Box::new(|_| open_window()),
             ..Default::default()
         }.into());

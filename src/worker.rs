@@ -54,7 +54,7 @@ pub fn apply(s: &Settings, parts: u32) -> Result<(), String> {
     // Music beside a game: lighter effects for both (model::beside_fx).
     let blended;
     let s = if parts & (part::FX | part::REFRESH) != 0 && s.per_app {
-        blended = Settings { blend: detect::music_beside_game_now(), ..s.clone() };
+        blended = Settings { blend: detect::beside_game_flag(), ..s.clone() };
         &blended
     } else {
         s
@@ -252,7 +252,7 @@ pub fn watch() -> ! {
     // What plays (each app and its kind) and whether music plays beside a game,
     // as last seen: each app's own sound and the lighter effects follow them.
     let mut last_streams = String::new();
-    let mut last_blend = false;
+    let mut beside = detect::BesideGame::new();
     let mut tray = if Settings::load().tray { crate::tray::start() } else { None };
     loop {
         // Keep the tray in step with changes made in the window.
@@ -275,11 +275,16 @@ pub fn watch() -> ! {
             system::apply_streams(&cur);
             last_streams = streams_now;
         }
-        let blend = cur.per_app && detect::music_beside_game(&each);
-        if blend != last_blend && card::present() {
+        if beside.update(cur.per_app && detect::music_beside_game(&each)) && card::present() {
             let _ = apply(&cur, part::FX);
-            eprintln!("sbcommand: {}", if blend { "music beside a game: lighter effects" } else { "the card's own effects again" });
-            last_blend = blend;
+            eprintln!("sbcommand: {}", if beside.on { "music beside a game: lighter effects" } else { "the card's own effects again" });
+        }
+        // Until something new plays, the sound's kind is what's playing now
+        // (each app's own sound needs to know which kind sets the card).
+        if cur.kind.is_empty() && !window_open() && let Some(d) = detect::main_of(&each) {
+            let mut s = Settings::load();
+            s.kind = crate::meta::kind_of_detection(&d).into();
+            let _ = s.save();
         }
         if cur.auto_mode != "off" {
             let now = detect::main_of(&each);
@@ -320,7 +325,7 @@ fn window_open() -> bool {
 }
 
 fn notify(args: &[&str]) -> Option<String> {
-    let mut a = vec!["-a", "Sound Blaster Command", "-i", "com.local.sbcommand"];
+    let mut a = vec!["-a", "Sound Blaster Command", "-i", crate::ICON];
     a.extend_from_slice(args);
     system::run("notify-send", &a)
 }

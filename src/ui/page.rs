@@ -46,6 +46,15 @@ pub enum Mon {
 
 #[derive(Default)]
 pub struct PageState {
+    /// The full-screen speaker test (speaker_test.rs): its overlay, its parts
+    /// (top, room, foot, title, Walk round), where its speakers can be tapped,
+    /// the walk's step and run, and whether music plays again when it closes.
+    pub test_pg: RefCell<Option<gtk::Overlay>>,
+    pub test_parts: RefCell<Option<(gtk::Box, gtk::DrawingArea, gtk::Box, gtk::Label, gtk::Button)>>,
+    pub test_hits: RefCell<Vec<(&'static str, [f64; 4])>>,
+    pub test_walk: Cell<Option<usize>>,
+    pub test_gen: Cell<u32>,
+    pub test_resume: Cell<bool>,
     /// Where the mini's speakers were last drawn (for tapping).
     pub mini_hits: RefCell<Vec<(&'static str, [f64; 4])>>,
     pub meta: RefCell<Option<(String, Meta)>>,
@@ -149,6 +158,11 @@ fn teams(title: &str) -> Option<(String, String)> {
 
 /// Pages whose room has a screen that shows the title, then pictures (and the
 /// trailer: by itself for games, one press away for films and series).
+/// The Remote's room shows the speakers in a row once it is over 3.2 times as wide as tall.
+fn remote_row(w: f64, h: f64) -> bool {
+    h > 0.0 && w / h > 3.2
+}
+
 fn has_monitor(k: Option<&Kind>) -> bool {
     matches!(k, Some(Kind::Game | Kind::Film | Kind::Tv))
 }
@@ -180,6 +194,7 @@ fn style_phrase(style: &str, k: &Kind) -> (String, String) {
         ("Concert", _) => p("like the concert hall", "SBX Concert"),
         ("Stadium", Kind::Sport) => p("in the stands", "SBX Stadium"),
         ("Stadium", _) => p("like a stadium", "SBX Stadium"),
+        ("Arena", _) => p("like a stadium", "SBX Arena"),
         ("Cinema", Kind::Sport) => p("like a big screen", "SBX Cinema"),
         ("Cinema", _) => p("like a cinema", "SBX Cinema"),
         ("Night", _) => p("quietly, for late at night", "SBX Night"),
@@ -448,7 +463,7 @@ impl Ui {
         self.stage.next.set_sensitive(mpris);
         self.stage.pp.set_sensitive(np.as_ref().is_some_and(|n| n.activity != "game"));
         self.stage.pp.set_icon_name(if np.as_ref().is_some_and(|n| n.playing) { "media-playback-pause-symbolic" } else { "media-playback-start-symbolic" });
-        self.stage.hint.set_visible(!compact);
+        self.stage.hint.set_visible(!compact && !self.stage.is_half());
         self.stage.room.queue_draw();
         self.stage.mirror();
         if self.panel_open() { self.fill_panel_head() }
@@ -526,9 +541,10 @@ impl Ui {
         // Room / Venue / Mode: the SBX profile
         let act = match kind { Kind::Game => "game", Kind::Studio | Kind::LiveSmall | Kind::LiveStadium => "music", _ => "movie" };
         let mut styles: Vec<String> = match kind {
-            Kind::Studio => vec!["Music".into(), "Concert".into()],
-            Kind::LiveSmall => vec!["Concert".into(), "Stadium".into(), "Music".into()],
-            Kind::LiveStadium => vec!["Stadium".into(), "Concert".into(), "Music".into()],
+            // (a studio song keeps the studio room whatever the sound; Arena just makes it bigger)
+            Kind::Studio => vec!["Music".into(), "Concert".into(), "Arena".into()],
+            Kind::LiveSmall => vec!["Concert".into(), "Arena".into(), "Music".into()],
+            Kind::LiveStadium => vec!["Arena".into(), "Concert".into(), "Music".into()],
             Kind::Sport => vec!["Stadium".into(), "Cinema".into(), "Night".into()],
             _ => model::styles_for(act).iter().map(|x| x.to_string()).collect(),
         };
@@ -635,7 +651,7 @@ impl Ui {
                 self.stage.hp.set_active(!want);
                 self.ask_switch_output();
             }
-            "test" => self.show_page("setup"),
+            "test" => self.open_speaker_test(),
             // ☰: the control centre, on the tab last shown (or closes it).
             "menu" => if self.panel_open() { self.close_panel() } else {
                 let last = self.side_stack.visible_child_name().map(|n| n.to_string()).unwrap_or_else(|| "sound".into());
@@ -730,7 +746,7 @@ impl Ui {
         }
         match kind {
             Some(Kind::LiveSmall) | Some(Kind::LiveStadium) => {
-                let want = if kind == Some(&Kind::LiveStadium) { "Stadium" } else { "Concert" };
+                let want = if kind == Some(&Kind::LiveStadium) { "Arena" } else { "Concert" };
                 let was = self.page.before_live.borrow().clone();
                 if cur != want && (cur == "Music" || was.is_some()) {
                     if was.is_none() {
@@ -741,7 +757,7 @@ impl Ui {
             }
             Some(_) => {
                 if let Some(prev) = self.page.before_live.borrow_mut().take()
-                    && matches!(cur.as_str(), "Concert" | "Stadium") {
+                    && matches!(cur.as_str(), "Concert" | "Stadium" | "Arena") {
                         self.set_style(&prev);
                     }
             }
@@ -874,6 +890,70 @@ impl Ui {
     }
 
     /// Draws the monitor's buttons while the pointer is over it.
+    /// Half a screen: Blueprint joins each note to the plan with a short dashed
+    /// line; Callouts joins each choice to what it changes with a red line
+    /// (Where to the nearer back speaker, Room to the back wall, Tone to where
+    /// you sit, Extras to the sub, or the centre speaker for voices).
+    fn draw_half_leaders(&self, cr: &gtk::cairo::Context, theme: &str, lay: &oys::Layout, g: crate::stage::HalfGeo) {
+        let tiles = self.stage.tile_rects(&self.stage.room);
+        let keys = self.stage.field_keys();
+        // Extras points at the centre speaker when it's only voices (or commentary) on, else at the sub.
+        let voices = self.stage.field_value("extra").is_some_and(|v| (v.contains("voice") || v.contains("commentary")) && !v.contains("bass"));
+        let red = (1.0, 0.165, 0.208);
+        cr.save().ok();
+        cr.set_source_rgb(red.0, red.1, red.2);
+        match theme {
+            "blueprint" => {
+                let (rx, _, rw, rh) = g.room;
+                let k = (rh * 0.94 / 440.0).min((rw - 20.0) / 540.0);
+                let (pl, pr) = (rx + rw / 2.0 - 260.0 * k, rx + rw / 2.0 + 260.0 * k);
+                cr.set_line_width(1.5);
+                cr.set_dash(&[6.0, 5.0], 0.0);
+                for (t, _) in &tiles {
+                    let y = t.1 + t.3 / 2.0;
+                    let (a, b) = if t.0 + t.2 / 2.0 < rx + rw / 2.0 { (t.0 + t.2, pl) } else { (t.0, pr) };
+                    if (b - a).abs() > 4.0 {
+                        cr.move_to(a, y);
+                        cr.line_to(b, y);
+                    }
+                }
+                let _ = cr.stroke();
+            }
+            "callouts" => {
+                let at = |id: &str| lay.speakers.iter().find(|(s, _)| *s == id).map(|(_, b)| (b.0 + b.2 / 2.0, b.1 + b.3 / 2.0));
+                cr.set_line_width(2.5);
+                let mid = g.room.0 + g.room.2 / 2.0;
+                for (i, (_, word)) in tiles.iter().enumerate() {
+                    // A callout: a rule under the word, then a line to what it changes.
+                    let left = word.0 + word.2 / 2.0 < mid;
+                    let base = word.1 + word.3 + 3.0;
+                    let from = (if left { word.0 + word.2 + 12.0 } else { word.0 - 12.0 }, base);
+                    let near = |a: &str, b: &str| match (at(a), at(b)) {
+                        (Some(p), Some(q)) => Some(if (p.0 - from.0).hypot(p.1 - from.1) <= (q.0 - from.0).hypot(q.1 - from.1) { p } else { q }),
+                        (p, q) => p.or(q),
+                    };
+                    let to = match keys.get(i).map(String::as_str) {
+                        Some("where") => near("RL", "RR"),
+                        Some("tone") => Some(lay.you),
+                        Some("extra") => if voices { at("FC") } else { at("LFE") },
+                        Some("room") => lay.screen_rect.map(|r| (r.0 + r.2 / 2.0, r.1 + r.3 * 0.2))
+                            .or_else(|| at("FL").zip(at("FR")).map(|(a, b)| ((a.0 + b.0) / 2.0, a.1.min(b.1) - g.room.3 * 0.1))),
+                        _ => None,
+                    };
+                    let Some(to) = to else { continue };
+                    cr.move_to(if left { word.0 } else { word.0 + word.2 }, base);
+                    cr.line_to(from.0, from.1);
+                    cr.line_to(to.0, to.1);
+                    let _ = cr.stroke();
+                    cr.arc(to.0, to.1, 5.0, 0.0, std::f64::consts::TAU);
+                    let _ = cr.fill();
+                }
+            }
+            _ => {}
+        }
+        cr.restore().ok();
+    }
+
     fn draw_monitor_buttons(&self, cr: &gtk::cairo::Context) {
         if !self.over_monitor(self.page.pointer.get()) {
             return;
@@ -953,7 +1033,7 @@ impl Ui {
 
     // ---- the room
 
-    fn draw_room(&self, cr: &gtk::cairo::Context, w: f64, h: f64) {
+    pub(crate) fn draw_room(&self, cr: &gtk::cairo::Context, w: f64, h: f64) {
         let (_, compact) = self.layout_now();
         if compact {
             // The compact view: the small speaker plan at the top right, if there's room.
@@ -995,17 +1075,17 @@ impl Ui {
         let prof = s.cur_profile();
         let place = if !s.sbx_active() { oys::Place::Plain } else {
             match (prof.as_str(), &kind) {
-                ("Music" | "Concert" | "Stadium", Kind::Studio) => oys::Place::Studio,
+                ("Music" | "Concert" | "Stadium" | "Arena", Kind::Studio) => oys::Place::Studio,
                 ("Music", _) => oys::Place::Studio,
                 ("Concert", _) => oys::Place::Concert,
-                ("Stadium", _) => oys::Place::Stadium,
+                ("Stadium" | "Arena", _) => oys::Place::Stadium,
                 ("Cinema" | "Night", _) => oys::Place::Cinema,
                 _ if s.activity == "game" || kind == Kind::Game => oys::Place::Gaming,
                 _ => oys::Place::Cinema,
             }
         };
-        let studio_grow = if kind == Kind::Studio && s.sbx_active() { match prof.as_str() { "Stadium" => 1.0, "Concert" => 0.6, _ => 0.0 } } else { 0.0 };
-        let size = match prof.as_str() { "Concert" | "Cinema" | "Gaming" => 1.0, "Stadium" => 2.0, _ => 0.0 };
+        let studio_grow = if kind == Kind::Studio && s.sbx_active() { match prof.as_str() { "Stadium" | "Arena" => 1.0, "Concert" => 0.6, _ => 0.0 } } else { 0.0 };
+        let size = match prof.as_str() { "Concert" | "Cinema" | "Gaming" => 1.0, "Stadium" | "Arena" => 2.0, _ => 0.0 };
         let fx = s.fx_of(&prof);
         let spread = if s.sbx_active() && fx.surround.0 { fx.surround.1 as f64 / 100.0 } else { 0.3 };
         let tone_rgb = match s.tone { t if t <= -2 => (1.0, 0.416, 0.122), -1 => (1.0, 0.333, 0.212), 0 => (1.0, 0.231, 0.267), 1 => (1.0, 0.561, 0.596), _ => (1.0, 0.824, 0.839) };
@@ -1030,20 +1110,52 @@ impl Ui {
             _ => oys::Screen::None,
         };
         let neon_text = if artist.is_empty() { title_up.as_str() } else { artist.as_str() };
+        let half = self.stage.half_geo();
+        let half_on = half.is_some();
         let sc = oys::Scene {
             place, studio_grow, active, levels, headphones: s.headphones(), sbx_on: s.sbx_active(), tone_rgb, size, spread,
             around: !s.headphones() && (stream_ch >= 6 || s.spreads()), playing: np.as_ref().is_some_and(|n| n.playing),
             t: self.t0.elapsed().as_secs_f64(), neon_text, neon_logo: tex.neon.as_ref().filter(|_| fresh),
             records: if fresh && kind == Kind::Studio { &tex.records } else { &[] }, screen,
-            left_clip: if self.stage.layout() == Layout::Split || self.stage.layout() == Layout::SplitSlim { w * 0.44 + 84.0 } else { 0.0 },
-            corner: self.stage.corner_rect(),
+            left_clip: if !half_on && (self.stage.layout() == Layout::Split || self.stage.layout() == Layout::SplitSlim) { w * 0.44 + 84.0 } else { 0.0 },
+            corner: if half_on { None } else { self.stage.corner_rect() },
+            fill: half_on,
         };
         let now = self.stage.room.frame_clock().map(|c| c.frame_time()).unwrap_or(0);
         let prev = self.page.last_frame.get();
         let dt = if prev > 0 && now > prev { ((now - prev) as f64 / 1e6).min(0.1) } else { 0.03 };
-        let lay = match s.theme.as_str() {
+        let draw = |cr: &gtk::cairo::Context, w: f64, h: f64| match s.theme.as_str() {
             "blueprint" | "screenprint" | "callouts" => crate::themes::draw(&s.theme, cr, w, h, dt, &sc, &mut self.page.smooth.borrow_mut()),
             _ => oys::draw(cr, w, h, dt, &sc, &mut self.page.smooth.borrow_mut()),
+        };
+        let lay = match half {
+            // Half a screen: the room in its own box, its edges fading into the page.
+            Some(g) => {
+                let (rx, ry, rw, rh) = g.room;
+                cr.push_group();
+                cr.translate(rx, ry);
+                let mut lay = draw(cr, rw, rh);
+                let _ = cr.pop_group_to_source();
+                let (top, bottom): (f64, f64) = match s.theme.as_str() { "blueprint" => (0.0, 0.0), "screenprint" => (0.0, 0.06), "callouts" => (0.06, 0.1), _ => (0.1, 0.2) };
+                let m = gtk::cairo::LinearGradient::new(0.0, ry, 0.0, ry + rh);
+                m.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, if top > 0.0 { 0.0 } else { 1.0 });
+                m.add_color_stop_rgba(top.max(0.001), 0.0, 0.0, 0.0, 1.0);
+                m.add_color_stop_rgba(1.0 - bottom.max(0.001), 0.0, 0.0, 0.0, 1.0);
+                m.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, if bottom > 0.0 { 0.0 } else { 1.0 });
+                let _ = cr.mask(&m);
+                for (_, b) in lay.speakers.iter_mut() {
+                    b.0 += rx;
+                    b.1 += ry;
+                }
+                if let Some(r) = lay.screen_rect.as_mut() {
+                    r.0 += rx;
+                    r.1 += ry;
+                }
+                lay.you = (lay.you.0 + rx, lay.you.1 + ry);
+                self.draw_half_leaders(cr, &s.theme, &lay, g);
+                lay
+            }
+            None => draw(cr, w, h),
         };
         drop(tex);
         *self.page.layout.borrow_mut() = lay.clone();
@@ -1432,7 +1544,7 @@ fn layout_name(id: &str) -> String {
 }
 
 /// Sends a play / pause / next / previous to the player showing this title.
-fn mpris(method: &str, title: &str) {
+pub(super) fn mpris(method: &str, title: &str) {
     let players = crate::detect::all_players();
     let p = players.iter().find(|p| !title.is_empty() && p.title == title)
         .or_else(|| players.iter().find(|p| p.status == "Playing"))
@@ -1748,8 +1860,15 @@ impl Ui {
         // The Remote's room and the Strip's cabinets, drawn and animated like the page's room.
         {
             let wk = Rc::downgrade(self);
+            // A wide, short room (the Remote in a wide window under 600 px tall)
+            // shows the six speakers front on, as the Strip does: the plan from
+            // above would shrink to a thin band.
             st.remote.room.set_draw_func(move |_, cr, w, h| if let Some(u) = wk.upgrade() {
-                room::draw(cr, w as f64, h as f64, &u.mini_room_state());
+                if remote_row(w as f64, h as f64) {
+                    room::row(Some(cr), w as f64, h as f64, &u.mini_room_state());
+                } else {
+                    room::draw(cr, w as f64, h as f64, &u.mini_room_state());
+                }
             });
             let wk = Rc::downgrade(self);
             st.strip.spk.set_draw_func(move |_, cr, w, h| if let Some(u) = wk.upgrade() {
@@ -1806,7 +1925,14 @@ impl Ui {
             let click = gtk::GestureClick::new();
             click.connect_released(move |g, _, x, y| if let Some(u) = wk.upgrade() {
                 let da = g.widget().unwrap();
-                if let Some(ch) = room::hit(da.width() as f64, da.height() as f64, &u.mini_room_state(), x, y) { u.test_speaker(ch) }
+                let (w, h) = (da.width() as f64, da.height() as f64);
+                let st = u.mini_room_state();
+                let hit = if remote_row(w, h) {
+                    room::row(None, w, h, &st).into_iter().find(|(_, b)| x >= b[0] && x <= b[0] + b[2] && y >= b[1] && y <= b[1] + b[3]).map(|(c, _)| c)
+                } else {
+                    room::hit(w, h, &st, x, y)
+                };
+                if let Some(ch) = hit { u.test_speaker(ch) }
             });
             st.remote.room.add_controller(click);
             let wk = Rc::downgrade(self);
@@ -1823,37 +1949,38 @@ impl Ui {
             let wk = Rc::downgrade(self);
             self.sizer.connect_resize(move |_, w, h| if let Some(u) = wk.upgrade() { u.on_window_size(w, h) });
         }
-        // The window buttons fade in near the top right (not in the Strip: it has them in ☰).
-        {
-            let motion = gtk::EventControllerMotion::new();
-            motion.set_propagation_phase(gtk::PropagationPhase::Capture);
-            let wk = Rc::downgrade(self);
-            motion.connect_motion(move |_, x, y| if let Some(u) = wk.upgrade() {
-                // Not in the Strip (it has its own); the control centre stops below them.
-                let near = y < 60.0 && x > u.win.width() as f64 * 0.55 && u.views.visible_child_name().as_deref() != Some("strip");
-                if u.wctl.reveals_child() != near { u.wctl.set_reveal_child(near) }
-            });
-            let wk = Rc::downgrade(self);
-            motion.connect_leave(move |_| if let Some(u) = wk.upgrade() { u.wctl.set_reveal_child(false) });
-            self.root_ov.add_controller(motion);
-        }
     }
 
     /// The page for a full-size window, the Remote for a small one (under
     /// 900 x 600, or the Compact theme), the Strip for a thin one (or when asked).
     pub fn on_window_size(self: &Rc<Self>, w: i32, h: i32) {
+        self.size_speaker_test(w, h);
         let compact_theme = self.s.borrow().compact_always;
         let small = w < 900 || h < 600;
         let mini = self.s.borrow().compact_view == "mini";
-        let view = if self.strip_on.get() || h < 150 { "strip" } else if compact_theme || small { if mini { "mini" } else { "remote" } } else { "page" };
+        // Under 300 px tall the window is the Strip (the Remote can't be that
+        // short, so dragging a window down ends there and can carry on to 76 px).
+        let view = if self.strip_on.get() || h < 300 { "strip" } else if compact_theme || small { if mini { "mini" } else { "remote" } } else { "page" };
         if self.views.visible_child_name().as_deref() != Some(view) {
             self.views.set_visible_child_name(view);
-            if view == "strip" { self.wctl.set_reveal_child(false) }
         }
+        // The window buttons are always there at the top right (hidden until
+        // the pointer came near, they were hard to reach), except in the
+        // Strip, which has its own.
+        self.wctl.set_reveal_child(view != "strip");
         if view != "strip" { self.full_size.set((w, h)) }
+        // Half a screen (Meta+Left on a 1920 screen, or any window 900–1200 wide):
+        // the theme's own layout.
+        let theme = self.s.borrow().theme.clone();
+        let half = view == "page" && w < 1200 && !matches!(self.stage.layout(), Layout::Split | Layout::SplitSlim);
+        if self.stage.set_half(half.then_some(theme.as_str())) {
+            self.update_stage();
+            self.stage.room.queue_draw();
+        }
         self.side_for(view == "strip");
         self.stage.remote.resized(w, h);
         self.stage.shoulder.resized(w, h);
+        if view == "strip" { self.stage.strip.resized(w, h) }
         self.size_panel(w, h, view);
         if self.page.auto_compact.get() != small {
             self.page.auto_compact.set(small);
@@ -1916,7 +2043,10 @@ impl Ui {
     /// The Strip: one thin row (1240 x 76) for the edge of a screen, kept above
     /// other windows if its pin is on; and back to the window it was.
     pub fn set_strip(self: &Rc<Self>, on: bool) {
-        if on == self.strip_on.get() { return; }
+        // A window dragged short is the Strip without asking: "Full window" makes it big again.
+        let dragged = !on && self.views.visible_child_name().as_deref() == Some("strip");
+        if on == self.strip_on.get() && !dragged { return; }
+        let was_pinned = self.strip_on.get();
         self.strip_on.set(on);
         let pin = self.s.borrow().strip_pin;
         if on {
@@ -1929,7 +2059,7 @@ impl Ui {
         } else {
             let (w, h) = self.full_size.get();
             self.win.set_default_size(w.max(900), h.max(600));
-            if pin { crate::mini::pin_window(false, crate::APP_ID) }
+            if pin && was_pinned { crate::mini::pin_window(false, crate::APP_ID) }
             self.on_window_size(w.max(900), h.max(600));
         }
     }

@@ -50,6 +50,64 @@ fn film() -> NowPlaying {
         stream: Some(StreamFmt { channels: 6, rate: 48000, format: "float32le".into(), map: String::new() }), ..Default::default() }
 }
 
+thread_local! {
+    /// The theme before the half-screen steps.
+    static THEME0: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Shows the page as on half a screen in this theme (whatever the window's size).
+fn set_half(u: &Ui, theme: Option<&str>) {
+    if let Some(t) = theme {
+        u.s.borrow_mut().theme = t.into();
+    }
+    u.stage.set_half(theme);
+    rc().update_stage();
+}
+
+/// The half-screen layout as laid out now: four tiles in the window, apart
+/// from each other, the title and the controls; each word within its tile;
+/// each speaker in the room's box and reached by a click.
+fn check_half(u: &Ui, theme: &str) -> Result<(), String> {
+    let (w, h) = (u.stage.root.width() as f64, u.stage.root.height() as f64);
+    let meets = |a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)| a.0 < b.0 + b.2 - 1.0 && b.0 < a.0 + a.2 - 1.0 && a.1 < b.1 + b.3 - 1.0 && b.1 < a.1 + a.3 - 1.0;
+    check(s(u).theme == theme && u.stage.is_half(), format!("not on half a screen in {theme}"))?;
+    let mut bad = vec![];
+    let tiles = u.stage.tile_rects(&u.stage.root);
+    check(tiles.len() == 4, format!("{} tiles", tiles.len()))?;
+    let head = u.stage.head_rect().unwrap_or_default();
+    let dock = u.stage.dock_rect().unwrap_or_default();
+    for (i, (t, word)) in tiles.iter().enumerate() {
+        if t.0 < 0.0 || t.1 < 0.0 || t.0 + t.2 > w + 1.0 || t.1 + t.3 > h + 1.0 { bad.push(format!("tile {i} outside the window {t:?}")) }
+        if meets(*t, head) { bad.push(format!("tile {i} {t:?} on the title {head:?}")) }
+        if meets(*t, dock) { bad.push(format!("tile {i} {t:?} on the controls {dock:?}")) }
+        if word.0 < t.0 - 1.0 || word.0 + word.2 > t.0 + t.2 + 1.0 { bad.push(format!("tile {i}'s word {word:?} is wider than its tile {t:?}")) }
+        for (j, o) in tiles.iter().enumerate().skip(i + 1) {
+            if meets(*t, o.0) { bad.push(format!("tiles {i} and {j} overlap")) }
+        }
+    }
+    // The room, drawn into its own box: each speaker takes a click.
+    let surf = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, w as i32, h as i32).map_err(|e| e.to_string())?;
+    let cr = gtk::cairo::Context::new(&surf).map_err(|e| e.to_string())?;
+    rc().draw_room(&cr, w, h);
+    let lay = u.page.layout.borrow().clone();
+    let g = u.stage.half_geo().ok_or("no half-screen layout")?;
+    if lay.speakers.len() < 6 { bad.push(format!("{} speakers", lay.speakers.len())) }
+    for (ch, b) in &lay.speakers {
+        let (x, y) = (b.0 + b.2 / 2.0, b.1 + b.3 / 2.0);
+        if x < g.room.0 - 1.0 || x > g.room.0 + g.room.2 + 1.0 || y < g.room.1 - 1.0 || y > g.room.1 + g.room.3 + 1.0 {
+            bad.push(format!("{ch} outside the room's box"));
+            continue;
+        }
+        let p = gtk::graphene::Point::new(x as f32, y as f32);
+        let Some(wp) = u.stage.room.compute_point(&u.win, &p) else { continue };
+        let top = u.win.pick(wp.x() as f64, wp.y() as f64, gtk::PickFlags::DEFAULT);
+        if top.as_ref() != Some(u.stage.room.upcast_ref::<gtk::Widget>()) {
+            bad.push(format!("{ch} under {}", top.map(|t| format!("{} {:?}", t.type_().name(), t.css_classes())).unwrap_or_default()));
+        }
+    }
+    check(bad.is_empty(), format!("{bad:?}"))
+}
+
 fn steps() -> Vec<Step> {
     let mut v: Vec<Step> = Vec::new();
     macro_rules! step {
@@ -381,6 +439,104 @@ fn steps() -> Vec<Step> {
         check(model::stream_sound(&s(u), "game").0.iter().all(|g| *g == 0), "the game sets the card")?;
         u.apply_kind("music");
         Ok(())
+    });
+    step!("Clicking each speaker in the room tests it", |u: &Ui| {
+        u.close_panel();
+        rc().on_window_size(u.win.width(), u.win.height());
+        let lay = u.page.layout.borrow().clone();
+        check(lay.speakers.len() >= 2, format!("the room has {} speakers to click", lay.speakers.len()))?;
+        // The room's own click handler, at the middle of each speaker.
+        let click = u.stage.room.observe_controllers().into_iter().flatten()
+            .find_map(|c| c.downcast::<gtk::GestureClick>().ok()).ok_or("the room has no click handler")?;
+        let mut missed = vec![];
+        for (ch, (x, y, w, h)) in &lay.speakers {
+            *u.room_lit.borrow_mut() = None;
+            click.emit_by_name::<()>("released", &[&1i32, &(x + w / 2.0), &(y + h / 2.0)]);
+            if u.room_lit.borrow().as_deref() != Some(*ch) {
+                missed.push(*ch);
+            }
+        }
+        check(missed.is_empty(), format!("clicks that didn't test their speaker: {missed:?}"))?;
+        // A real click goes to the top widget under the pointer: it must be the room.
+        let mut covered = vec![];
+        for (ch, (x, y, w, h)) in &lay.speakers {
+            let p = gtk::graphene::Point::new((x + w / 2.0) as f32, (y + h / 2.0) as f32);
+            let Some(wp) = u.stage.room.compute_point(&u.win, &p) else { continue };
+            let top = u.win.pick(wp.x() as f64, wp.y() as f64, gtk::PickFlags::DEFAULT);
+            if top.as_ref() != Some(u.stage.room.upcast_ref::<gtk::Widget>()) {
+                let what = top.map(|t| format!("{} {:?}", t.type_().name(), t.css_classes())).unwrap_or_else(|| "nothing".into());
+                covered.push(format!("{ch} under {what}"));
+            }
+        }
+        check(covered.is_empty(), format!("speakers a click can't reach: {covered:?}"))
+    });
+    // Half a screen: each theme is set up in one step and checked in the next,
+    // once a frame has laid it out.
+    const HALF: [&str; 4] = ["oys", "blueprint", "screenprint", "callouts"];
+    step!("Half a screen: the themes' own layouts", |u: &Ui| {
+        u.close_panel();
+        THEME0.with(|t| *t.borrow_mut() = s(u).theme.clone());
+        set_half(u, Some(HALF[0]));
+        check(u.stage.is_half(), "half a screen")
+    });
+    for (i, theme) in HALF.iter().enumerate() {
+        let name: &'static str = Box::leak(format!("Half a screen in {theme}: four tiles apart, words that fit, every speaker clickable").into_boxed_str());
+        step!(name, move |u: &Ui| {
+            let r = check_half(u, theme);
+            match HALF.get(i + 1) {
+                Some(next) => set_half(u, Some(next)),
+                None => {
+                    let t0 = THEME0.with(|t| t.borrow().clone());
+                    u.s.borrow_mut().theme = t0;
+                    set_half(u, None);
+                    rc().on_window_size(u.win.width(), u.win.height());
+                }
+            }
+            r
+        });
+    }
+    step!("A short window is the Strip: it fits any width", |u: &Ui| {
+        let (w, h) = (u.win.width(), u.win.height());
+        let mut bad = vec![];
+        for (sw, sh, must, mustnt) in [(1240, 76, vec!["choices", "title", "readout"], vec![]), (1200, 200, vec!["choices", "title"], vec![]),
+                                       (450, 100, vec![], vec!["choices", "cabinets"])] {
+            rc().on_window_size(sw, sh);
+            if u.views.visible_child_name().as_deref() != Some("strip") { bad.push(format!("{sw}x{sh}: not the Strip")) }
+            u.stage.strip.fit();
+            let shows = u.stage.strip.shows();
+            let need = u.stage.strip.root.measure(gtk::Orientation::Horizontal, -1).1;
+            if need > sw { bad.push(format!("{sw}x{sh}: needs {need} px")) }
+            for m in &must { if !shows.contains(m) { bad.push(format!("{sw}x{sh}: no {m} ({shows:?})")) } }
+            for m in &mustnt { if shows.contains(m) { bad.push(format!("{sw}x{sh}: {m} still there")) } }
+        }
+        rc().on_window_size(w, h);
+        check(bad.is_empty(), format!("{bad:?}"))?;
+        check(u.views.visible_child_name().as_deref() == Some("page") || h < 600 || w < 900, "and back")
+    });
+    step!("The speaker test: full screen, each speaker, walk round, close", |u: &Ui| {
+        rc().page_action("test");
+        check(u.page.test_pg.borrow().is_some() && !u.panel_open(), "the dock's speaker button opens it full screen")?;
+        // Where the speakers are when the room is drawn (here on a 1000 x 600 page).
+        let surf = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 1000, 600).map_err(|e| e.to_string())?;
+        let cr = gtk::cairo::Context::new(&surf).map_err(|e| e.to_string())?;
+        let chans = ["FL", "FR", "FC", "LFE", "RL", "RR"];
+        let hits = crate::ui::draw_test_room(&cr, 1000.0, 600.0, &chans, None, 0.0);
+        check(chans.iter().all(|c| hits.iter().filter(|h| h.0 == *c).count() == 2), "each speaker and its name can be tapped")?;
+        *u.page.test_hits.borrow_mut() = hits.clone();
+        let room = u.page.test_parts.borrow().as_ref().map(|p| p.1.clone()).ok_or("no room")?;
+        let click = room.observe_controllers().into_iter().flatten().find_map(|c| c.downcast::<gtk::GestureClick>().ok()).ok_or("no click")?;
+        for (ch, b) in hits.iter().step_by(1) {
+            *u.room_lit.borrow_mut() = None;
+            click.emit_by_name::<()>("released", &[&1i32, &(b[0] + b[2] / 2.0), &(b[1] + b[3] / 2.0)]);
+            check(u.room_lit.borrow().as_deref() == Some(*ch), format!("tapping {ch}"))?;
+        }
+        let walk = u.page.test_parts.borrow().as_ref().map(|p| p.4.clone()).ok_or("no walk")?;
+        walk.emit_clicked();
+        check(u.page.test_walk.get() == Some(0) && u.room_lit.borrow().as_deref() == Some("FL"), "Walk round starts at the front left")?;
+        walk.emit_clicked();
+        check(u.page.test_walk.get().is_none(), "Stop")?;
+        u.close_speaker_test();
+        check(u.page.test_pg.borrow().is_none(), "closed")
     });
     step!("Per-game memory", |u: &Ui| {
         use crate::detect::Detection;

@@ -250,19 +250,45 @@ pub fn music_beside_game(each: &[(u64, Detection)]) -> bool {
     each.iter().any(|(_, d)| d.activity == "game") && each.iter().any(|(_, d)| d.activity == "music")
 }
 
-/// The same, looked up at most every two seconds (card writes happen often
-/// while a knob turns).
-pub fn music_beside_game_now() -> bool {
-    use std::sync::Mutex;
-    use std::time::{Duration, Instant};
-    static LAST: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
-    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((at, v)) = *last && at.elapsed() < Duration::from_secs(2) {
-        return v;
+/// Whether the card's effects are eased for music beside a game right now.
+/// The background service decides (`BesideGame`, held steady) and leaves a
+/// flag, so the window and the service write the same effects to the card.
+pub fn beside_game_flag() -> bool {
+    crate::system::cache_dir().join("beside-game").exists()
+}
+
+/// Music beside a game, held steady: on after both have played for 4 s, off
+/// after 10 s without. Games and players start and stop their streams often
+/// (in menus, between songs); the card's effects shouldn't follow every blip.
+pub struct BesideGame {
+    raw: bool,
+    since: std::time::Instant,
+    pub on: bool,
+}
+
+impl BesideGame {
+    pub fn new() -> Self {
+        let _ = std::fs::remove_file(crate::system::cache_dir().join("beside-game"));
+        BesideGame { raw: false, since: std::time::Instant::now(), on: false }
     }
-    let v = music_beside_game(&detect_each());
-    *last = Some((Instant::now(), v));
-    v
+
+    /// The latest check; true when the steady state changed (the flag is updated).
+    pub fn update(&mut self, raw: bool) -> bool {
+        use std::time::Duration;
+        if raw != self.raw {
+            self.raw = raw;
+            self.since = std::time::Instant::now();
+        }
+        let held = self.since.elapsed();
+        let next = if raw { self.on || held >= Duration::from_secs(4) } else { self.on && held < Duration::from_secs(10) };
+        if next == self.on {
+            return false;
+        }
+        self.on = next;
+        let f = crate::system::cache_dir().join("beside-game");
+        let _ = if next { std::fs::write(&f, "") } else { std::fs::remove_file(&f) };
+        true
+    }
 }
 
 fn str_of(v: &Value) -> String {

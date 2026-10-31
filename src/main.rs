@@ -36,6 +36,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 pub(crate) const APP_ID: &str = "com.local.sbcommand";
+/// The icon's name. It changes when the icon does: KDE keeps icons by name in
+/// memory and never notices a new file under an old name.
+pub(crate) const ICON: &str = "com.local.sbcommand-sb";
 
 /// Sound Blaster red, with a few touches to make the Home page feel like a
 /// control panel rather than a settings list.
@@ -141,6 +144,20 @@ progressbar.pink progress { background: #ff416c; }
 .fixes { padding: 6px 10px; }
 .fixes button { padding: 5px 8px; font-size: 12.5px; }
 .lf-row { font-size: 13px; }
+/* The full-screen speaker test (round 101): photo in red, a shade, Anton words. */
+.spktest { background: #e3262f; }
+.spktest .shade { background: linear-gradient(90deg, alpha(black, 0.93), alpha(black, 0.78) 60%, alpha(black, 0.66)); }
+.spktest .kick { font-family: "Archivo Narrow"; font-weight: 700; font-size: 13px; letter-spacing: 0.78px; color: #ff4b53; }
+.spktest .ttl { font-family: "Anton"; color: white; }
+.spktest .x { min-width: 46px; min-height: 46px; padding: 0; border-radius: 999px; border: 1px solid alpha(white, 0.25); background: alpha(black, 0.53); color: white; font-size: 22px; box-shadow: none; }
+.spktest .x:hover { border-color: #ff4b53; }
+.spktest .walk { background: white; color: black; font-family: "Anton"; font-weight: normal; font-size: 19px; padding: 11px 24px; border-radius: 999px; box-shadow: none; }
+.spktest .walk:hover { background: #ffcfd2; }
+.spktest .walk.on { background: #e3262f; color: white; }
+.spktest .tseg { border: 1px solid alpha(white, 0.21); border-radius: 999px; padding: 3px; background: alpha(black, 0.4); }
+.spktest .tseg button { border-radius: 999px; padding: 6px 15px; font-family: "Archivo Narrow"; font-weight: 700; font-size: 12px; letter-spacing: 0.84px; color: alpha(white, 0.69); background: none; min-height: 0; box-shadow: none; }
+.spktest .tseg button:checked { background: white; color: black; }
+.spktest .note { font-size: 12.5px; color: alpha(white, 0.5); }
 .cc .in-row { padding: 2px 10px 2px 12px; min-height: 36px; }
 .cc .in-row .lvl-name { font-size: 13.5px; color: white; }
 .cc .lf-card { padding: 4px; border-radius: 8px; }
@@ -214,7 +231,7 @@ fn main() -> glib::ExitCode {
             }
             gui(None, true)
         }
-        "" | "home" | "effects" | "compare" | "sbx" | "crystalvoice" | "mic" | "recording" | "scout" | "speakers" | "playback"
+        "" | "home" | "effects" | "compare" | "sbx" | "crystalvoice" | "mic" | "recording" | "scout" | "speakers" | "playback" | "speaker-test"
         | "setup" | "mixer" | "eq" | "tone" | "settings" | "sound" | "look" => {
             gui((!arg.is_empty()).then_some(arg), false)
         }
@@ -241,7 +258,7 @@ fn gui(page: Option<String>, selftest: bool) -> glib::ExitCode {
         if let Some(display) = gtk::gdk::Display::default() {
             gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
         }
-        gtk::Window::set_default_icon_name(APP_ID);
+        gtk::Window::set_default_icon_name(ICON);
     });
     app.connect_activate(move |app| {
         if let Some(w) = app.active_window() {
@@ -263,14 +280,14 @@ fn gui(page: Option<String>, selftest: bool) -> glib::ExitCode {
             app.add_action(&reload);
         }
         if let Some(p) = &page {
-            ui.show_page(p);
+            if p == "speaker-test" { ui.open_speaker_test() } else { ui.show_page(p) }
         }
         if let Some((w, h)) = std::env::var("SBCOMMAND_SHOT_SIZE").ok().and_then(|v| {
             let (w, h) = v.split_once('x')?;
             Some((w.parse().ok()?, h.parse().ok()?))
         }) {
             // A thin size is the Strip: switched to first, so the window may be that thin.
-            if h < 150 { ui.set_strip(true) }
+            if h < 300 { ui.set_strip(true) }
             ui.win.set_default_size(w, h);
         }
         ui.win.present();

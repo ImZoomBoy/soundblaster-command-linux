@@ -208,6 +208,12 @@ pub fn play_test(s: &Settings, ch: &str) {
             let _ = make_rumble(&p);
         }
         p
+    } else if s.test_sound != "voice" {
+        let p = cache_dir().join("test-noise.wav");
+        if !p.exists() {
+            let _ = make_noise(&p);
+        }
+        p
     } else {
         let f = match ch {
             "FL" => "Front_Left.wav",
@@ -311,6 +317,50 @@ pub fn spread_to_channel(src: &PathBuf, layout: &[&str], ch: &str, dst: &PathBuf
 
 /// A rumble (50/70/90 Hz plus low noise) that any PC subwoofer can play.
 /// A pure 45 Hz tone was too deep for the user's subwoofer.
+/// A short burst of pink noise (softer on top than white noise), faded in and
+/// out, for the speaker test's "Noise".
+pub fn make_noise(path: &PathBuf) -> std::io::Result<()> {
+    let rate = 48_000u32;
+    let n = (1.4 * rate as f64) as usize;
+    let mut data = Vec::with_capacity(n * 2);
+    let mut seed = 7u64;
+    // Paul Kellet's pink filter.
+    let (mut b0, mut b1, mut b2) = (0.0f64, 0.0f64, 0.0f64);
+    for i in 0..n {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let w = ((seed >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0;
+        b0 = 0.99765 * b0 + w * 0.0990460;
+        b1 = 0.96300 * b1 + w * 0.2965164;
+        b2 = 0.57000 * b2 + w * 1.0526913;
+        let pink = (b0 + b1 + b2 + w * 0.1848) * 0.25;
+        let env = (i as f64 / 1920.0).min((n - i) as f64 / 1920.0).min(1.0);
+        let v = (pink * 0.5 * env).clamp(-1.0, 1.0);
+        data.extend_from_slice(&((v * 32767.0) as i16).to_le_bytes());
+    }
+    write_wav(path, rate, &data)
+}
+
+fn write_wav(path: &PathBuf, rate: u32, data: &[u8]) -> std::io::Result<()> {
+    let mut wav = Vec::with_capacity(44 + data.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&(rate * 2).to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(data);
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    std::fs::write(path, wav)
+}
+
 pub fn make_rumble(path: &PathBuf) -> std::io::Result<()> {
     let rate = 48_000u32;
     let n = (2.5 * rate as f64) as usize;
@@ -326,24 +376,7 @@ pub fn make_rumble(path: &PathBuf) -> std::io::Result<()> {
         let v = ((0.25 * tone + 3.0 * y) * 0.8 * env).clamp(-1.0, 1.0);
         data.extend_from_slice(&((v * 32767.0) as i16).to_le_bytes());
     }
-    let mut wav = Vec::with_capacity(44 + data.len());
-    wav.extend_from_slice(b"RIFF");
-    wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
-    wav.extend_from_slice(b"WAVEfmt ");
-    wav.extend_from_slice(&16u32.to_le_bytes());
-    wav.extend_from_slice(&1u16.to_le_bytes());
-    wav.extend_from_slice(&1u16.to_le_bytes());
-    wav.extend_from_slice(&rate.to_le_bytes());
-    wav.extend_from_slice(&(rate * 2).to_le_bytes());
-    wav.extend_from_slice(&2u16.to_le_bytes());
-    wav.extend_from_slice(&16u16.to_le_bytes());
-    wav.extend_from_slice(b"data");
-    wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
-    wav.extend_from_slice(&data);
-    if let Some(d) = path.parent() {
-        std::fs::create_dir_all(d)?;
-    }
-    std::fs::write(path, wav)
+    write_wav(path, rate, &data)
 }
 
 // ------------------------------------------------------------------ extra outputs

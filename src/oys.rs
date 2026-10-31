@@ -111,6 +111,9 @@ pub struct Scene<'a> {
     /// The page's top-right corner (the big 5.1 or the venue tag): x, y, w, h.
     /// Wall screens in the other themes stay below it.
     pub corner: Option<(f64, f64, f64, f64)>,
+    /// The room has the whole drawing to itself (half a screen): centred and
+    /// as big as fits, with no title beside it.
+    pub fill: bool,
 }
 
 impl Default for Scene<'_> {
@@ -134,6 +137,7 @@ impl Default for Scene<'_> {
             screen: Screen::None,
             left_clip: 0.0,
             corner: None,
+            fill: false,
         }
     }
 }
@@ -1203,15 +1207,24 @@ pub fn draw(cr: &Context, w: f64, h: f64, dt: f64, sc: &Scene, sm: &mut Smooth) 
     if w < 2.0 || h < 2.0 {
         return lay;
     }
-    let hy = h * 0.44;
+    let mut hy = h * 0.44;
     let mut f = h * 0.82;
     let mut cx = w * 0.72;
-    // with a split page, the room moves (and if needed shrinks) so it sits wholly right of the seam
+    // The room stays wholly inside the window: in a tall narrow one it would
+    // run off the right edge, so it moves left and, if need be, shrinks; with
+    // a split page it sits wholly right of the seam.
     let seam = sc.left_clip.clamp(0.0, w - 1.0);
-    if seam > 0.0 {
-        let kq = 0.465;
-        f = f.min((w - seam - 44.0) / (2.0 * kq)).max(60.0);
-        cx = cx.max(seam + 30.0 + kq * f).min(w - 12.0 - kq * f);
+    let kq = 0.465;
+    let left = if seam > 0.0 { seam + 30.0 } else { 12.0 };
+    if sc.fill {
+        // Its own box (half a screen): the room reaches from about 0.12 f above
+        // the horizon to 0.58 f below it, the side speakers 0.465 f either side.
+        f = ((w - 24.0) / (2.0 * kq * 1.06)).min(h / 0.72).max(60.0);
+        cx = w * 0.5;
+        hy = h * 0.5 - 0.22 * f;
+    } else {
+        f = f.min((w - left - 12.0) / (2.0 * kq)).max(60.0);
+        cx = cx.min(w - 12.0 - kq * f).max(left + kq * f);
     }
 
     // what the scene asks for
@@ -2068,6 +2081,7 @@ mod tests {
             screen: s.screen,
             left_clip: s.left_clip,
             corner: s.corner,
+            fill: s.fill,
         }
     }
 }

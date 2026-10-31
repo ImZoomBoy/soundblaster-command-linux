@@ -14,6 +14,8 @@ use crate::worker::{part, Event, Job};
 use crate::stage;
 
 mod page;
+mod speaker_test;
+pub use speaker_test::draw_room as draw_test_room;
 use adw::prelude::*;
 use gtk::{gio, glib};
 use std::cell::{Cell, RefCell};
@@ -97,7 +99,7 @@ pub struct Ui {
 
     // ---- the room and what's playing
     pub room: gtk::DrawingArea,
-    room_lit: RefCell<Option<String>>,
+    pub room_lit: RefCell<Option<String>>,
     pub levels: Cell<[f32; 6]>,
     meter: RefCell<Option<crate::meters::Meter>>,
     t0: Instant,
@@ -855,14 +857,21 @@ pub fn build(app: &adw::Application, jobs: Sender<Job>, events: async_channel::R
     root_ov.add_overlay(&cc_rev);
     banner.set_valign(gtk::Align::Start);
     root_ov.add_overlay(&banner);
-    // The window buttons fade in at the top right when the pointer comes near
-    // the top edge (with no header bar), with the busy spinner beside them.
+    // The window buttons at the top right (there's no header bar), with the
+    // busy spinner beside them; always shown except in the Strip.
     let wbox = gtk::Box::builder().spacing(8).css_classes(["wctl"]).margin_top(8).margin_end(10).build();
     wbox.append(&spinner);
     wbox.append(&gtk::WindowControls::new(gtk::PackType::End));
     let wctl = gtk::Revealer::builder().child(&wbox).transition_type(gtk::RevealerTransitionType::Crossfade).transition_duration(180)
         .halign(gtk::Align::End).valign(gtk::Align::Start).reveal_child(false).build();
     root_ov.add_overlay(&wctl);
+    // A closed revealer that crossfades keeps its full size, so it must not take
+    // clicks meant for the page under it (the room's speakers sat under ☰'s
+    // closed panel and couldn't be clicked).
+    for r in [&cc_rev, &wctl] {
+        r.set_can_target(false);
+        r.connect_reveal_child_notify(|r| r.set_can_target(r.reveals_child()));
+    }
     // Follows the window's size whatever it shows (the page, the Remote or the Strip).
     let sizer = gtk::DrawingArea::builder().hexpand(true).vexpand(true).can_target(false).build();
     root_ov.add_overlay(&sizer);
@@ -1027,6 +1036,7 @@ fn connect(ui: &Rc<Ui>, side_close: &gtk::Button, cc_strip: &gtk::Button) {
         let wk = Rc::downgrade(ui);
         keys.connect_key_pressed(move |_, key, _, _| {
             let Some(u) = wk.upgrade() else { return glib::Propagation::Proceed };
+            if key == gtk::gdk::Key::Escape && u.page.test_pg.borrow().is_some() { u.close_speaker_test(); return glib::Propagation::Stop; }
             if key == gtk::gdk::Key::Escape && u.panel_open() { u.close_panel(); return glib::Propagation::Stop; }
             glib::Propagation::Proceed
         });
@@ -1913,6 +1923,11 @@ impl Ui {
         *self.playing_source.borrow_mut() = Some(d.source.clone());
         let kind = crate::meta::kind_of_detection(&d);
         *self.playing_kind.borrow_mut() = kind.to_string();
+        // Until something new plays, the sound's kind is what's playing now.
+        if self.s.borrow().kind.is_empty() {
+            self.s.borrow_mut().kind = kind.into();
+            self.save_now();
+        }
         let mode = self.s.borrow().auto_mode.clone();
         if !fresh || mode == "off" {
             return;

@@ -1,33 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <!-- Sound Blaster Command: a speaker in the page red on a dark tile, its sound
-       spreading as the halftone dots of the app's room floor. -->
-  <defs>
-    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#26262b"/>
-      <stop offset="1" stop-color="#0f0f11"/>
-    </linearGradient>
-    <linearGradient id="box" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f0353e"/>
-      <stop offset="1" stop-color="#b8141d"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#e3262f" stop-opacity="0.45"/>
-      <stop offset="1" stop-color="#e3262f" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#tile)"/>
-  <rect x="4.5" y="4.5" width="119" height="119" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
-  <circle cx="50" cy="66" r="44" fill="url(#glow)"/>
-  <!-- the speaker -->
-  <rect x="22" y="22" width="56" height="84" rx="11" fill="url(#box)"/>
-  <circle cx="50" cy="42" r="7.5" fill="#ffffff"/>
-  <circle cx="50" cy="76" r="19" fill="none" stroke="#ffffff" stroke-width="9"/>
-  <circle cx="50" cy="76" r="5.5" fill="#ffffff"/>
-  <!-- its sound: halftone dots growing outwards -->
-  <circle cx="90" cy="76" r="4" fill="#ff5a62"/>
-  <circle cx="103" cy="76" r="5.5" fill="#ff5a62"/>
-  <circle cx="96" cy="60" r="3.2" fill="#ff5a62" fill-opacity="0.85"/>
-  <circle cx="96" cy="92" r="3.2" fill="#ff5a62" fill-opacity="0.85"/>
-  <circle cx="108" cy="54" r="2.6" fill="#ff5a62" fill-opacity="0.7"/>
-  <circle cx="108" cy="98" r="2.6" fill="#ff5a62" fill-opacity="0.7"/>
+  <!-- Sound Blaster Command: "SB" bent into red neon on black (round 122, the
+       user's pick). The glow is layered strokes, no filters, so it looks the
+       same wherever the icon is drawn. -->
+<defs><linearGradient id="t" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d0c0f"/><stop offset="1" stop-color="#050203"/></linearGradient>
+<radialGradient id="halo" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#e3262f" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>
+<rect x="4" y="4" width="120" height="120" rx="28" fill="url(#t)"/>
+<circle cx="64" cy="64" r="54" fill="url(#halo)"/>
+<ellipse cx="64" cy="112" rx="38" ry="6.5" fill="#e3262f" fill-opacity=".18"/>
+<path d="M57 40 C55 32 31 30 31 45 C31 60 57 56 57 74 C57 92 31 92 29 82" fill="none" stroke="#e3262f" stroke-opacity="0.12" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M71 34 V94 M71 34 H83 C96 34 96 62 83 62 H71 M71 62 H85 C100 62 100 94 85 94 H71" fill="none" stroke="#e3262f" stroke-opacity="0.12" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M57 40 C55 32 31 30 31 45 C31 60 57 56 57 74 C57 92 31 92 29 82" fill="none" stroke="#e3262f" stroke-opacity="0.18" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M71 34 V94 M71 34 H83 C96 34 96 62 83 62 H71 M71 62 H85 C100 62 100 94 85 94 H71" fill="none" stroke="#e3262f" stroke-opacity="0.18" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M57 40 C55 32 31 30 31 45 C31 60 57 56 57 74 C57 92 31 92 29 82" fill="none" stroke="#ff2a35" stroke-opacity="0.38" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M71 34 V94 M71 34 H83 C96 34 96 62 83 62 H71 M71 62 H85 C100 62 100 94 85 94 H71" fill="none" stroke="#ff2a35" stroke-opacity="0.38" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M57 40 C55 32 31 30 31 45 C31 60 57 56 57 74 C57 92 31 92 29 82" fill="none" stroke="#ff4b53" stroke-opacity="0.9" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M71 34 V94 M71 34 H83 C96 34 96 62 83 62 H71 M71 62 H85 C100 62 100 94 85 94 H71" fill="none" stroke="#ff4b53" stroke-opacity="0.9" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M57 40 C55 32 31 30 31 45 C31 60 57 56 57 74 C57 92 31 92 29 82" fill="none" stroke="#ff8a90" stroke-opacity="1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M71 34 V94 M71 34 H83 C96 34 96 62 83 62 H71 M71 62 H85 C100 62 100 94 85 94 H71" fill="none" stroke="#ff8a90" stroke-opacity="1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M57 40 C55 32 31 30 31 45 C31 60 57 56 57 74 C57 92 31 92 29 82" fill="none" stroke="#ffe3e5" stroke-opacity="0.9" stroke-width="1.0" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M71 34 V94 M71 34 H83 C96 34 96 62 83 62 H71 M71 62 H85 C100 62 100 94 85 94 H71" fill="none" stroke="#ffe3e5" stroke-opacity="0.9" stroke-width="1.0" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="4.5" y="4.5" width="119" height="119" rx="27.5" fill="none" stroke="#fff" stroke-opacity=".12"/>
 </svg>

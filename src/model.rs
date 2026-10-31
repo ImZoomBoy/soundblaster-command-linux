@@ -99,6 +99,10 @@ pub fn fx_builtin() -> Vec<(&'static str, Fx)> {
         ("Night", fx((true, 67), (true, 55), (true, 20), (true, 74, "Night"), (true, 30))),
         // This app's own: Creative has no profile for plain studio music.
         ("Music", fx((false, 67), (true, 55), (true, 45), (false, 74, "Normal"), (false, 50))),
+        // This app's own, for a stadium gig: Creative's Stadium is for watching
+        // sport (no bass, Smart Volume and Dialog+ for the commentary), which
+        // sounds thin on music. Wide, clear, big bass, nothing squeezed.
+        ("Arena", fx((true, 67), (true, 45), (true, 65), (false, 74, "Normal"), (false, 50))),
         ("FPS", fx((true, 12), (true, 65), (true, 20), (true, 20, "Normal"), (false, 50))),
         ("Racing", fx((true, 30), (false, 50), (true, 20), (true, 40, "Normal"), (true, 30))),
         ("RPG", fx((true, 35), (false, 50), (true, 20), (true, 30, "Normal"), (true, 15))),
@@ -391,6 +395,8 @@ pub struct Settings {
     pub compact_view: String,
     /// The compact view in big windows too (it was the "Compact" theme).
     pub compact_always: bool,
+    /// The speaker test plays "noise" or a "voice" naming each speaker.
+    pub test_sound: String,
     /// Tone: -2 much warmer .. 0 as mixed .. +2 much brighter, on top of the EQ.
     pub tone: i32,
     /// Look up pictures, logos and details online (TheAudioDB, Steam, TMDB).
@@ -516,7 +522,7 @@ pub fn styles_for(a: &str) -> &'static [&'static str] {
         "game" => &["Gaming", "FPS", "Racing", "RPG", "Strategy", "Adventure"],
         "movie" => &["Cinema", "Night"],
         // "Pure" isn't offered: switching SBX off is the pure sound.
-        _ => &["Music", "Concert", "Stadium"],
+        _ => &["Music", "Concert", "Arena"],
     }
 }
 
@@ -625,7 +631,7 @@ impl Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            version: 4,
+            version: 5,
             output: "speakers".into(),
             speaker_config: "5.1".into(),
             speaker_type: "desktop".into(),
@@ -678,6 +684,7 @@ impl Default for Settings {
             strip_pin: false,
             compact_view: "remote".into(),
             compact_always: false,
+            test_sound: "noise".into(),
             tone: 0,
             pictures_online: true,
             tmdb_key: String::new(),
@@ -736,6 +743,32 @@ impl Settings {
                 s.eq_presets.insert("Rock (classic)".into(), c);
             }
             s.version = 4;
+        }
+        if s.version < 5 {
+            // Version 5: the user prefers Creative's Rock after all (2026-10-30),
+            // so the "Rock (classic)" version 4 put everywhere goes back to Rock.
+            // (Rock (classic) stays in the list.)
+            let back = |n: &mut String| {
+                if n == "Rock (classic)" {
+                    *n = "Rock".into();
+                }
+            };
+            back(&mut s.eq.speakers);
+            back(&mut s.eq.headphones);
+            s.eqs.values_mut().for_each(back);
+            s.app_memory.values_mut().for_each(|m| back(&mut m.eq));
+            s.kinds.values_mut().for_each(|k| back(&mut k.eq));
+            // Music in a stadium has its own profile now (Creative's Stadium is for sport).
+            if s.styles.get("music").map(String::as_str) == Some("Stadium") {
+                s.styles.insert("music".into(), "Arena".into());
+            }
+            if let Some(k) = s.kinds.get_mut("music") && k.profile == "Stadium" {
+                k.profile = "Arena".into();
+            }
+            for m in s.app_memory.values_mut().filter(|m| m.activity == "music" && m.profile == "Stadium") {
+                m.profile = "Arena".into();
+            }
+            s.version = 5;
         }
         // Always on one of the current activity's SBX profiles.
         let a = if ACTIVITIES.iter().any(|x| x.0 == s.activity) { s.activity.clone() } else { "music".to_string() };
@@ -1178,7 +1211,11 @@ pub fn bass_boost(s: &Settings) -> Vec<f64> {
     }
     let gain = 8.0 * p.bass.1.clamp(0, 100) as f64 / 100.0;
     let xover = p.bass_xover.max(20) as f64;
-    BAND_HZ.iter().map(|f| if *f <= xover { gain } else if *f <= xover * 2.0 { gain / 2.0 } else { 0.0 }).collect()
+    // With bass going to the sub, Bass reaches everything the sub plays (below
+    // the speakers' crossover: 140 Hz for the DTT2200), not just Creative's
+    // 80 Hz; above that, half as much up to twice the Bass crossover (the punch).
+    let top = if s.bass_redirect { xover.max(s.crossover as f64) } else { xover };
+    BAND_HZ.iter().map(|f| if *f <= top { gain } else if *f <= xover * 2.0 { gain / 2.0 } else { 0.0 }).collect()
 }
 
 /// What an app of another kind than the one setting the card plays with: the
@@ -1266,6 +1303,7 @@ pub fn profile_about(name: &str) -> &'static str {
         "Concert" => "Creative's: a wide, lively stage for live and party music",
         "Night" => "Creative's: no sudden loud bangs, and clearer voices, for late nights",
         "Music" => "This app's own: detail and bass without surround, for studio albums (Creative has none for this)",
+        "Arena" => "This app's own: a stadium gig, wide with big bass and nothing squeezed (Creative's Stadium is for sport)",
         "FPS" => "Creative's: sharp detail for hearing every step, with little surround",
         "Racing" => "Creative's: clear engines and voices, with a light surround",
         "RPG" => "Creative's: open worlds and clear voices for role-playing games",
@@ -1309,6 +1347,9 @@ mod tests {
 
     use super::*;
 
+    /// Tests that point SBCOMMAND_CONFIG_DIR at a temporary folder take turns.
+    static CONFIG_DIR_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn old_settings_files_still_load() {
         let old = r#"{"version":2,"output":"speakers","speaker_config":"5.1","speaker_type":"dtt2200",
@@ -1323,7 +1364,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sbc-model-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("settings.json"), old).unwrap();
-        // SAFETY: tests in this module don't read SBCOMMAND_CONFIG_DIR concurrently.
+        // (one test at a time points the settings folder elsewhere)
+        let _turn = CONFIG_DIR_TURN.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: the lock above keeps the tests that set it from overlapping.
         unsafe { std::env::set_var("SBCOMMAND_CONFIG_DIR", &dir) };
         let s = Settings::load();
         unsafe { std::env::remove_var("SBCOMMAND_CONFIG_DIR") };
@@ -1332,26 +1375,29 @@ mod tests {
         assert_eq!(s.cur_profile(), "Music");
         assert!(s.fx_of("Music").surround.0, "your own tweak to Creative's Music is kept");
         assert!(!s.fx_profiles.contains_key("Boom") && !s.fx_profiles.contains_key("Everyday: Music"));
-        assert!(s.upmix && s.version == 4, "stereo on all speakers is kept");
+        assert!(s.upmix && s.version == 5, "stereo on all speakers is kept");
     }
 
     #[test]
-    fn version_3_rock_becomes_rock_classic() {
+    fn old_rock_settings_end_on_creatives_rock() {
         let old = r#"{"version":3,"activity":"music","eq":{"speakers":"Rock","headphones":"Rock"},
         "eqs":{"music":"Rock","movie":"New Age"},"app_memory":{"Spotify":{"activity":"music","profile":"Music","eq":"Rock"}}}"#;
         let dir = std::env::temp_dir().join(format!("sbc-model-test-v3-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("settings.json"), old).unwrap();
-        // SAFETY: tests in this module don't read SBCOMMAND_CONFIG_DIR concurrently.
+        // (one test at a time points the settings folder elsewhere)
+        let _turn = CONFIG_DIR_TURN.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: the lock above keeps the tests that set it from overlapping.
         unsafe { std::env::set_var("SBCOMMAND_CONFIG_DIR", &dir) };
         let s = Settings::load();
         unsafe { std::env::remove_var("SBCOMMAND_CONFIG_DIR") };
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(s.cur_eq(), "Rock (classic)", "the Rock you had keeps sounding the same");
-        assert_eq!(s.eqs.get("music").map(String::as_str), Some("Rock (classic)"));
+        // Version 4 made Rock "Rock (classic)"; version 5 puts it back (the user prefers Creative's Rock).
+        assert_eq!(s.cur_eq(), "Rock");
+        assert_eq!(s.eqs.get("music").map(String::as_str), Some("Rock"));
         assert_eq!(s.eqs.get("movie").map(String::as_str), Some("Flat"), "New Age is gone from Creative's list");
-        assert_eq!(s.app_memory["Spotify"].eq, "Rock (classic)");
-        assert_eq!(s.version, 4);
+        assert_eq!(s.app_memory["Spotify"].eq, "Rock");
+        assert_eq!(s.version, 5);
     }
 
     #[test]
@@ -1671,6 +1717,10 @@ mod tests {
         s.output = "headphones".into();
         assert!(!bass_through_eq(&s), "headphones use the card's own X-Bass");
         s.output = "speakers".into();
+        // A sub that plays up to 140 Hz (the DTT2200) gets Bass over all of it.
+        s.crossover = 140;
+        let full = bass_boost(&s)[0];
+        assert!(full > 0.0 && bass_boost(&s)[2] == full && bass_boost(&s)[3] == 0.0, "Bass to 140 Hz: {:?}", bass_boost(&s));
         s.speaker_config = "2.0".into();
         assert!(!bass_through_eq(&s), "without a subwoofer the card's own X-Bass works");
     }

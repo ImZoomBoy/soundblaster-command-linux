@@ -16,9 +16,9 @@ pub struct EqPick {
     pub why: String,
 }
 
-/// Genre words → EQ preset (Creative's, except rock, which keeps the classic
-/// Rock the user prefers). Checked in this order, so "pop punk" is rock and
-/// "indie pop" is Pop.
+/// Genre words → Creative's EQ presets (rock gets Creative's Rock, which the
+/// user prefers to the older "Rock"). Checked in this order, so
+/// "pop punk" is rock and "indie pop" is Pop.
 const RULES: [(&[&str], &str); 12] = [
     (&["podcast", "spoken", "audiobook", "comedy", "speech", "talk"], "Vocal"),
     (&["classical", "orchestra", "opera", "baroque", "symphon", "chamber"], "Classical"),
@@ -26,13 +26,13 @@ const RULES: [(&[&str], &str); 12] = [
     (&["country", "folk", "bluegrass", "americana"], "Country"),
     (&["acoustic", "singer-songwriter", "unplugged"], "Acoustic"),
     (&["ambient", "new age", "chillout", "lo-fi", "lofi", "downtempo"], "Flat"),
-    (&["rock", "punk", "metal", "grunge", "hardcore", "emo", "ska"], "Rock (classic)"),
+    (&["rock", "punk", "metal", "grunge", "hardcore", "emo", "ska"], "Rock"),
     (&["hip hop", "hip-hop", "rap", "trap", "grime", "drill"], "Hip Hop"),
     (&["r&b", "rnb", "soul", "neo soul"], "R&B"),
     (&["electronic", "dance", "house", "techno", "trance", "edm", "drum and bass", "dubstep",
        "reggaeton", "garage"], "Dance"),
     (&["pop", "disco", "funk"], "Pop"),
-    (&["indie", "alternative"], "Rock (classic)"),
+    (&["indie", "alternative"], "Rock"),
 ];
 
 /// The preset for one genre word, if any.
@@ -143,8 +143,8 @@ mod tests {
 
     #[test]
     fn genres_map_to_creatives_presets() {
-        for (g, p) in [("punk rock", "Rock (classic)"), ("pop punk", "Rock (classic)"), ("thrash metal", "Rock (classic)"),
-                       ("indie pop", "Pop"), ("indie", "Rock (classic)"), ("hip hop", "Hip Hop"), ("trap", "Hip Hop"),
+        for (g, p) in [("punk rock", "Rock"), ("pop punk", "Rock"), ("thrash metal", "Rock"),
+                       ("indie pop", "Pop"), ("indie", "Rock"), ("hip hop", "Hip Hop"), ("trap", "Hip Hop"),
                        ("soul", "R&B"), ("house", "Dance"), ("jazz", "Jazz"), ("Classical", "Classical"),
                        ("folk", "Country"), ("ambient", "Flat"), ("singer-songwriter", "Acoustic"),
                        ("synthpop", "Pop"), ("podcast", "Vocal")] {
@@ -152,7 +152,7 @@ mod tests {
         }
         assert_eq!(preset_for("american"), None);
         let p = pick_from(&["american".into(), "skate punk".into(), "pop".into()]).unwrap();
-        assert_eq!((p.preset, p.why.as_str()), ("Rock (classic)", "skate punk"), "first mappable, most popular first");
+        assert_eq!((p.preset, p.why.as_str()), ("Rock", "skate punk"), "first mappable, most popular first");
     }
 
     #[test]
