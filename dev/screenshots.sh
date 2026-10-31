@@ -37,9 +37,18 @@ shot mixer mixer movie film '{"activity":"movie","boost_db":3,"listen":"51"}'
 shot crystalvoice crystalvoice "" music '{"activity":"music","rec":{"voice_clarity":true,"noise_reduction":true,"smart_volume":true,"svm_level":60,"focus":true,"focus_angle":90}}'
 shot setup setup "" music '{"activity":"music","speaker_type":"dtt2200","crossover":140}'
 shot settings settings "" music '{"activity":"music"}'
+# Every window size: half a screen in each theme (Meta+Left on a 1920 x 1080 screen), the Strip
+# dragged taller, the Remote wide and short; and the full-screen speaker test.
+shot half-oys "" music music "{\"activity\":\"music\",\$ROCK}" "" 960x1032
+shot half-blueprint "" movie film '{"activity":"movie","theme":"blueprint"}' "" 960x1032 4500
+shot half-screenprint "" game game '{"activity":"game","theme":"screenprint"}' "" 960x1032 4500
+shot half-callouts "" music music "{\"activity\":\"music\",\"theme\":\"callouts\",\$ROCK}" "" 960x1032
+shot strip-tall "" music music "{\"activity\":\"music\",\$ROCK}" "" 1240x180
+shot remote-wide "" movie film '{"activity":"movie"}' "" 1400x420 4500
+shot speaker-test speaker-test music music "{\"activity\":\"music\",\$ROCK}"
 EOS
 chmod +x /tmp/sbshots-run.sh
-timeout 500 dev/isolated-kwin.sh /tmp/sbshots-run.sh >/dev/null 2>&1 || true
+SBTEST_W=1920 SBTEST_H=1080 timeout 900 dev/isolated-kwin.sh /tmp/sbshots-run.sh >/dev/null 2>&1 || true
 rm -f /tmp/sbshots-run.sh
 [ -f "$OUT/music.png" ] && cp "$OUT/music.png" "$OUT/hero.png"
 ls "$OUT"
